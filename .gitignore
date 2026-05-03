@@ -17,3 +17,6 @@ Cargo.lock
 # OS files
 .DS_Store
 Thumbs.db
+
+# Documentation references (local clones from external repos)
+docs_reference/

@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APPS_DIR="$ROOT_DIR/apps"
-TARGET="wasm32-wasi"
+TARGET="wasm32-wasip1"
 
 if ! command -v cargo >/dev/null 2>&1; then
   echo "Error: cargo is not installed or not in PATH." >&2
@@ -19,7 +19,7 @@ if ! rustup target list --installed | grep -Fxq "$TARGET"; then
   echo "Rust target $TARGET is not installed. Attempting to install..."
   if ! rustup target add "$TARGET"; then
     echo "Error: unable to install required target $TARGET." >&2
-    echo "This repository enforces the wasm32-wasi target by design." >&2
+    echo "This repository enforces the wasm32-wasip1 (WASI Preview 1) target by design." >&2
     exit 1
   fi
 fi

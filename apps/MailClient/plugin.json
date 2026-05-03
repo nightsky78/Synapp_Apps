@@ -1,0 +1,831 @@
+{
+  "name": "MailClient",
+  "version": "1.0.0",
+  "description": "AI-native email client for Synapp platform. Unified interface for human UI and autonomous agents to read, draft, send, and organize emails with granular permission gating.",
+  "executionInterface": {
+    "wasmTarget": "wasm32-wasip1",
+    "wasmPath": "target/wasm32-wasip1/release/mail_client.wasm",
+    "exports": [
+      {
+        "name": "read_emails",
+        "description": "Fetch paginated list of emails from a specified mailbox",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "user_id": {
+              "type": "string",
+              "description": "Authenticated user identifier"
+            },
+            "mailbox": {
+              "type": "string",
+              "description": "Folder identifier (INBOX, SENT, DRAFTS, TRASH, JUNK, ARCHIVE, or custom folder_id)",
+              "examples": ["INBOX", "SENT", "custom_folder_1"]
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Pagination offset (0-indexed)"
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "description": "Max emails to return"
+            },
+            "permission": {
+              "type": "string",
+              "enum": ["none", "read", "draft", "send"],
+              "description": "Agent permission level"
+            }
+          },
+          "required": ["user_id", "mailbox", "offset", "limit", "permission"]
+        },
+        "outputSchema": {
+          "type": "object",
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "type": "object",
+                  "properties": {
+                    "emails": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/definitions/Email"
+                      },
+                      "description": "List of emails"
+                    },
+                    "total_count": {
+                      "type": "integer",
+                      "description": "Total emails in mailbox (for pagination UI)"
+                    },
+                    "has_more": {
+                      "type": "boolean",
+                      "description": "Whether more emails exist beyond limit"
+                    }
+                  },
+                  "required": ["emails", "total_count", "has_more"]
+                }
+              },
+              "required": ["ok"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "err": {
+                  "$ref": "#/definitions/Error"
+                }
+              },
+              "required": ["err"]
+            }
+          ]
+        }
+      },
+      {
+        "name": "get_email",
+        "description": "Fetch a single email by ID, including full body and metadata",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "user_id": {
+              "type": "string",
+              "description": "Authenticated user identifier"
+            },
+            "email_id": {
+              "type": "string",
+              "description": "Unique email identifier"
+            },
+            "permission": {
+              "type": "string",
+              "enum": ["none", "read", "draft", "send"],
+              "description": "Agent permission level"
+            }
+          },
+          "required": ["user_id", "email_id", "permission"]
+        },
+        "outputSchema": {
+          "type": "object",
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "$ref": "#/definitions/Email"
+                }
+              },
+              "required": ["ok"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "err": {
+                  "$ref": "#/definitions/Error"
+                }
+              },
+              "required": ["err"]
+            }
+          ]
+        }
+      },
+      {
+        "name": "draft_email",
+        "description": "Create a new email draft (not sent)",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "user_id": {
+              "type": "string",
+              "description": "Authenticated user identifier"
+            },
+            "to": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "email"
+              },
+              "minItems": 1,
+              "description": "Primary recipients"
+            },
+            "cc": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "email"
+              },
+              "description": "Carbon copy recipients (optional)"
+            },
+            "bcc": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "email"
+              },
+              "description": "Blind carbon copy recipients (optional)"
+            },
+            "subject": {
+              "type": "string",
+              "maxLength": 1000,
+              "description": "Email subject line"
+            },
+            "body": {
+              "type": "string",
+              "description": "Email body (HTML or plain text)"
+            },
+            "permission": {
+              "type": "string",
+              "enum": ["none", "read", "draft", "send"],
+              "description": "Agent permission level"
+            }
+          },
+          "required": ["user_id", "to", "subject", "body", "permission"]
+        },
+        "outputSchema": {
+          "type": "object",
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "$ref": "#/definitions/Draft"
+                }
+              },
+              "required": ["ok"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "err": {
+                  "$ref": "#/definitions/Error"
+                }
+              },
+              "required": ["err"]
+            }
+          ]
+        }
+      },
+      {
+        "name": "send_email",
+        "description": "Send a draft email to recipients. Transitions draft from DRAFTS to SENT folder.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "user_id": {
+              "type": "string",
+              "description": "Authenticated user identifier"
+            },
+            "draft_id": {
+              "type": "string",
+              "description": "Draft identifier from draft_email()"
+            },
+            "permission": {
+              "type": "string",
+              "enum": ["none", "read", "draft", "send"],
+              "description": "Agent permission level"
+            }
+          },
+          "required": ["user_id", "draft_id", "permission"]
+        },
+        "outputSchema": {
+          "type": "object",
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "type": "object",
+                  "properties": {
+                    "email_id": {
+                      "type": "string",
+                      "description": "ID of sent email"
+                    },
+                    "sent_at": {
+                      "type": "integer",
+                      "description": "Unix timestamp when sent"
+                    }
+                  },
+                  "required": ["email_id", "sent_at"]
+                }
+              },
+              "required": ["ok"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "err": {
+                  "$ref": "#/definitions/Error"
+                }
+              },
+              "required": ["err"]
+            }
+          ]
+        }
+      },
+      {
+        "name": "list_folders",
+        "description": "Enumerate all folders for the user",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "user_id": {
+              "type": "string",
+              "description": "Authenticated user identifier"
+            },
+            "permission": {
+              "type": "string",
+              "enum": ["none", "read", "draft", "send"],
+              "description": "Agent permission level"
+            }
+          },
+          "required": ["user_id", "permission"]
+        },
+        "outputSchema": {
+          "type": "object",
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "type": "object",
+                  "properties": {
+                    "folders": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/definitions/Folder"
+                      }
+                    }
+                  },
+                  "required": ["folders"]
+                }
+              },
+              "required": ["ok"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "err": {
+                  "$ref": "#/definitions/Error"
+                }
+              },
+              "required": ["err"]
+            }
+          ]
+        }
+      },
+      {
+        "name": "move_email",
+        "description": "Move an email from one folder to another",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "user_id": {
+              "type": "string",
+              "description": "Authenticated user identifier"
+            },
+            "email_id": {
+              "type": "string",
+              "description": "Email to move"
+            },
+            "target_folder_id": {
+              "type": "string",
+              "description": "Destination folder identifier"
+            },
+            "permission": {
+              "type": "string",
+              "enum": ["none", "read", "draft", "send"],
+              "description": "Agent permission level"
+            }
+          },
+          "required": ["user_id", "email_id", "target_folder_id", "permission"]
+        },
+        "outputSchema": {
+          "type": "object",
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "type": "null",
+                  "description": "Success (no data returned)"
+                }
+              },
+              "required": ["ok"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "err": {
+                  "$ref": "#/definitions/Error"
+                }
+              },
+              "required": ["err"]
+            }
+          ]
+        }
+      },
+      {
+        "name": "search_emails",
+        "description": "Full-text search across emails matching query string",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "user_id": {
+              "type": "string",
+              "description": "Authenticated user identifier"
+            },
+            "query": {
+              "type": "string",
+              "description": "Search expression (free-form text or operators like from:, to:, subject:, before:, after:, is:, has:)"
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "description": "Max results to return"
+            },
+            "permission": {
+              "type": "string",
+              "enum": ["none", "read", "draft", "send"],
+              "description": "Agent permission level"
+            }
+          },
+          "required": ["user_id", "query", "limit", "permission"]
+        },
+        "outputSchema": {
+          "type": "object",
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "type": "object",
+                  "properties": {
+                    "emails": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/definitions/Email"
+                      }
+                    },
+                    "matched_count": {
+                      "type": "integer",
+                      "description": "Total matches (may exceed limit)"
+                    },
+                    "has_more": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": ["emails", "matched_count", "has_more"]
+                }
+              },
+              "required": ["ok"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "err": {
+                  "$ref": "#/definitions/Error"
+                }
+              },
+              "required": ["err"]
+            }
+          ]
+        }
+      },
+      {
+        "name": "get_agent_permissions",
+        "description": "Query the current agent's permission level",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "user_id": {
+              "type": "string",
+              "description": "Authenticated user identifier"
+            },
+            "permission": {
+              "type": "string",
+              "enum": ["none", "read", "draft", "send"],
+              "description": "Current agent permission level (provided by host)"
+            }
+          },
+          "required": ["user_id", "permission"]
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "permission_level": {
+              "type": "string",
+              "enum": ["none", "read", "draft", "send"]
+            },
+            "user_id": {
+              "type": "string"
+            },
+            "agent_id": {
+              "type": "string",
+              "description": "Requesting agent identifier"
+            },
+            "granted_at": {
+              "type": "integer",
+              "description": "Unix timestamp"
+            },
+            "expires_at": {
+              "type": "integer",
+              "description": "Unix timestamp (0 = never expires)"
+            }
+          },
+          "required": ["permission_level", "user_id", "agent_id", "granted_at", "expires_at"]
+        }
+      }
+    ]
+  },
+  "semanticInterface": {
+    "tools": [
+      {
+        "name": "read_emails",
+        "description": "Retrieve emails from a specific folder with pagination. Returns a list of Email objects sorted by received_at (newest first).",
+        "category": "query",
+        "permissionLevel": "read",
+        "examples": [
+          {
+            "description": "Fetch first 20 unread emails from inbox",
+            "input": {
+              "user_id": "user_123",
+              "mailbox": "INBOX",
+              "offset": 0,
+              "limit": 20,
+              "permission": "read"
+            }
+          }
+        ]
+      },
+      {
+        "name": "get_email",
+        "description": "Fetch a single email by ID, including full body and all metadata. Marks email as read.",
+        "category": "query",
+        "permissionLevel": "read",
+        "examples": [
+          {
+            "description": "Retrieve full content of a specific email",
+            "input": {
+              "user_id": "user_123",
+              "email_id": "email_abc123",
+              "permission": "read"
+            }
+          }
+        ]
+      },
+      {
+        "name": "draft_email",
+        "description": "Create a new email draft with recipients, subject, and body. Returns draft_id for later sending or modification.",
+        "category": "mutation",
+        "permissionLevel": "draft",
+        "examples": [
+          {
+            "description": "Create a draft email to a single recipient",
+            "input": {
+              "user_id": "user_123",
+              "to": ["recipient@company.com"],
+              "cc": [],
+              "bcc": [],
+              "subject": "Project Update",
+              "body": "Here is the latest status...",
+              "permission": "draft"
+            }
+          }
+        ]
+      },
+      {
+        "name": "send_email",
+        "description": "Send a draft email. Moves draft from DRAFTS to SENT folder and dispatches to recipients. Requires send permission.",
+        "category": "mutation",
+        "permissionLevel": "send",
+        "examples": [
+          {
+            "description": "Send a previously drafted email",
+            "input": {
+              "user_id": "user_123",
+              "draft_id": "draft_xyz789",
+              "permission": "send"
+            }
+          }
+        ]
+      },
+      {
+        "name": "list_folders",
+        "description": "Enumerate all folders in the user's mailbox, including system folders (INBOX, SENT, DRAFTS, etc.) and custom folders.",
+        "category": "query",
+        "permissionLevel": "read",
+        "examples": [
+          {
+            "description": "List all available folders",
+            "input": {
+              "user_id": "user_123",
+              "permission": "read"
+            }
+          }
+        ]
+      },
+      {
+        "name": "move_email",
+        "description": "Move an email to a different folder. Can move to standard folders or custom user-created folders.",
+        "category": "mutation",
+        "permissionLevel": "draft",
+        "examples": [
+          {
+            "description": "Move email to trash",
+            "input": {
+              "user_id": "user_123",
+              "email_id": "email_abc123",
+              "target_folder_id": "trash",
+              "permission": "send"
+            }
+          }
+        ]
+      },
+      {
+        "name": "search_emails",
+        "description": "Full-text search across user's emails. Supports query operators like from:, to:, subject:, before:, after:, is:unread, has:attachment",
+        "category": "query",
+        "permissionLevel": "read",
+        "examples": [
+          {
+            "description": "Search for emails from a specific sender",
+            "input": {
+              "user_id": "user_123",
+              "query": "from:alice@company.com",
+              "limit": 50,
+              "permission": "read"
+            }
+          }
+        ]
+      },
+      {
+        "name": "get_agent_permissions",
+        "description": "Introspect the current agent's permission level. Useful for conditional logic: if permission == 'send' then send_email() else draft_email()",
+        "category": "query",
+        "permissionLevel": "none",
+        "examples": [
+          {
+            "description": "Check agent capabilities before proceeding",
+            "input": {
+              "user_id": "user_123",
+              "permission": "send"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "capabilities": {
+    "maxRecipientsPerEmail": 100,
+    "maxSubjectLength": 1000,
+    "maxEmailSize": 25000000,
+    "paginationLimit": 500,
+    "draftExpiryDays": 7,
+    "trashRetentionDays": 30,
+    "searchTimeout": 10
+  },
+  "definitions": {
+    "Email": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique email identifier"
+        },
+        "message_id": {
+          "type": "string",
+          "description": "RFC 5322 Message-ID"
+        },
+        "user_id": {
+          "type": "string",
+          "description": "Owner user ID"
+        },
+        "from": {
+          "type": "string",
+          "format": "email",
+          "description": "Sender email address"
+        },
+        "to": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "email"
+          },
+          "description": "Recipient addresses"
+        },
+        "cc": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "email"
+          },
+          "description": "Carbon copy addresses"
+        },
+        "bcc": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "email"
+          },
+          "description": "Blind carbon copy addresses"
+        },
+        "subject": {
+          "type": "string",
+          "description": "Email subject"
+        },
+        "body": {
+          "type": "string",
+          "description": "Email body (HTML or plain text)"
+        },
+        "received_at": {
+          "type": "integer",
+          "description": "Unix timestamp (seconds)"
+        },
+        "sent_at": {
+          "type": "integer",
+          "description": "Unix timestamp (0 if draft)"
+        },
+        "is_read": {
+          "type": "boolean",
+          "description": "Read/unread status"
+        },
+        "folder_id": {
+          "type": "string",
+          "description": "Current folder"
+        },
+        "thread_id": {
+          "type": "string",
+          "description": "Thread grouping identifier"
+        },
+        "has_attachments": {
+          "type": "boolean"
+        },
+        "importance": {
+          "type": "string",
+          "enum": ["low", "normal", "high"]
+        }
+      },
+      "required": [
+        "id",
+        "message_id",
+        "user_id",
+        "from",
+        "to",
+        "subject",
+        "body",
+        "received_at",
+        "sent_at",
+        "is_read",
+        "folder_id",
+        "thread_id",
+        "has_attachments",
+        "importance"
+      ]
+    },
+    "Draft": {
+      "type": "object",
+      "properties": {
+        "draft_id": {
+          "type": "string",
+          "description": "Unique draft identifier"
+        },
+        "to": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "email"
+          }
+        },
+        "cc": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "email"
+          }
+        },
+        "bcc": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "email"
+          }
+        },
+        "subject": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": "integer",
+          "description": "Unix timestamp"
+        },
+        "updated_at": {
+          "type": "integer",
+          "description": "Unix timestamp"
+        },
+        "scheduled_send_at": {
+          "type": "integer",
+          "description": "Unix timestamp (0 = send immediately)"
+        }
+      },
+      "required": [
+        "draft_id",
+        "to",
+        "cc",
+        "bcc",
+        "subject",
+        "body",
+        "created_at",
+        "updated_at",
+        "scheduled_send_at"
+      ]
+    },
+    "Folder": {
+      "type": "object",
+      "properties": {
+        "folder_id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["system", "custom"]
+        },
+        "unread_count": {
+          "type": "integer"
+        },
+        "total_count": {
+          "type": "integer"
+        }
+      },
+      "required": ["folder_id", "name", "type", "unread_count", "total_count"]
+    },
+    "Error": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "PermissionDenied",
+            "EmailNotFound",
+            "DraftNotFound",
+            "FolderNotFound",
+            "InvalidRecipient",
+            "InvalidInput",
+            "DraftAlreadySent",
+            "TooManyRecipients",
+            "InternalError"
+          ]
+        },
+        "message": {
+          "type": "string",
+          "description": "Human-readable error description"
+        }
+      },
+      "required": ["code", "message"]
+    }
+  }
+}
