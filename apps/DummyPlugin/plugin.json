@@ -1,0 +1,34 @@
+{
+  "name": "DummyPlugin",
+  "version": "0.1.0",
+  "description": "Template Synapp app exposing a simple Wasm export.",
+  "executionInterface": {
+    "wasmTarget": "wasm32-wasi",
+    "wasmPath": "target/wasm32-wasi/release/dummy_plugin.wasm",
+    "exports": [
+      {
+        "name": "add",
+        "description": "Add two integers.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "a": { "type": "integer" },
+            "b": { "type": "integer" }
+          },
+          "required": ["a", "b"]
+        },
+        "outputSchema": {
+          "type": "integer"
+        }
+      }
+    ]
+  },
+  "semanticInterface": {
+    "tools": [
+      {
+        "name": "add",
+        "description": "Adds two numbers via the DummyPlugin Wasm export."
+      }
+    ]
+  }
+}

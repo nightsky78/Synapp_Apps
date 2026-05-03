@@ -1,0 +1,19 @@
+# Rust build artifacts
+**/target/
+Cargo.lock
+
+# Wasm and generated artifacts
+*.wasm
+
+# Environment and local overrides
+.env
+.env.*
+!.env.example
+
+# IDE/editor
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db

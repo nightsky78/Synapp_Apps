@@ -1,0 +1,89 @@
+version: 1
+name: Synapp Agent Pipeline
+objective: Deliver Dual-Interface Synapp apps with secure code, validated tests, and complete docs.
+
+global_rules:
+  - Follow .github/copilot-instructions.md exactly.
+  - Keep Execution Interface (Wasm exports) and Semantic Interface (plugin.json) synchronized in the same change.
+  - Reject any AI routing logic inside Wasm apps.
+
+stages:
+  - id: architecture
+    agent: architect
+    input:
+      - product_goal
+      - app_scope
+    output:
+      - docs/architecture.md
+      - docs/contracts.md
+      - docs/plugin-schema-plan.md
+    gate:
+      - Exports are clearly defined.
+      - plugin.json schema updates are mapped for every function.
+
+  - id: ui_design
+    agent: ui-designer
+    input:
+      - docs/architecture.md
+    output:
+      - docs/ui-spec.md
+      - docs/ui-copy.md
+    gate:
+      - UX paths are complete.
+      - Accessibility requirements are documented.
+
+  - id: development
+    agent: developer
+    input:
+      - docs/contracts.md
+      - docs/plugin-schema-plan.md
+      - docs/ui-spec.md
+    output:
+      - source_changes
+      - plugin_json_updates
+      - scripts_or_tooling_updates
+    gate:
+      - Rust/Go targets compile for wasm32-wasi or wasm32-unknown-unknown.
+      - Function signatures and plugin.json schemas match.
+
+  - id: qa_security
+    agent: qa-security-tester
+    input:
+      - source_changes
+      - plugin_json_updates
+    output:
+      - docs/qa-security-report.md
+      - issue_list
+    gate:
+      - No direct DB network usage from apps.
+      - No embedded prompts/OpenAI SDK/AI router logic in app code.
+
+  - id: testing
+    agent: testing
+    input:
+      - source_changes
+    output:
+      - test_results
+      - docs/test-matrix.md
+    gate:
+      - Unit/integration tests executed or clearly marked with blockers.
+      - Build script path validated.
+
+  - id: documentation
+    agent: techwriter
+    input:
+      - docs/qa-security-report.md
+      - docs/test-matrix.md
+      - final_changes
+    output:
+      - README_updates
+      - docs/release-notes.md
+      - docs/operator-guide.md
+    gate:
+      - Setup/run guidance is accurate.
+      - Architecture decisions and constraints are documented.
+
+handoff_policy:
+  require_stage_gate_pass: true
+  block_on_missing_outputs: true
+  escalation_agent: architect
