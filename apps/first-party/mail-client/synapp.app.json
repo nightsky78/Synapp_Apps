@@ -3,9 +3,9 @@
   "schema_version": "1.0.0",
   "app_id": "mail-client",
   "name": "Mail Client",
-  "version": "1.0.0",
-  "summary": "AI-native email client for human and agent workflows.",
-  "description": "First-party Synapp mail client exposing read, draft, send, search, and mailbox organization tools through the generic Wasm platform contract.",
+  "version": "2.1.0",
+  "summary": "Full-featured mail client with human settings integration and AI-invocable tools.",
+  "description": "First-party Synapp mail client. The app exposes mailbox navigation, reading, compose, sending, scheduling, folders, and rules through a Wasm command-planner interface. Host user settings own account credentials and OAuth state through the settings_panel schema.",
   "publisher": {
     "id": "synapp",
     "name": "Synapp"
@@ -14,121 +14,100 @@
   "platform_api": "v1",
   "entrypoint": "target/wasm32-wasip1/release/mail_client.wasm",
   "capabilities": [
-    {
-      "capability": "mail:read",
-      "label": "Read mail",
-      "description": "Read message metadata and bodies from user-approved mailboxes.",
-      "required": true,
-      "risk": "high"
-    },
-    {
-      "capability": "mail:draft",
-      "label": "Draft mail",
-      "description": "Create and update draft messages without sending them.",
-      "required": false,
-      "risk": "medium"
-    },
-    {
-      "capability": "mail:send",
-      "label": "Send mail",
-      "description": "Send messages from user-approved accounts.",
-      "required": false,
-      "risk": "critical"
-    },
-    {
-      "capability": "mail:organize",
-      "label": "Organize mail",
-      "description": "Move messages between folders and apply labels.",
-      "required": false,
-      "risk": "medium"
-    }
+    { "capability": "mail:read", "label": "Read mail", "description": "Read accounts, folders, messages, threads, and unread counters.", "required": true, "risk": "high" },
+    { "capability": "mail:draft", "label": "Draft mail", "description": "Create, update, and discard drafts without sending them.", "required": false, "risk": "medium" },
+    { "capability": "mail:send", "label": "Send mail", "description": "Send, reply, forward, and schedule outgoing messages.", "required": false, "risk": "critical" },
+    { "capability": "mail:organize", "label": "Organize mail", "description": "Move, archive, flag, folder, and rules management operations.", "required": false, "risk": "high" }
   ],
   "tools": [
-    {
-      "name": "read_emails",
-      "description": "Fetch a paginated list of emails from a mailbox.",
-      "input_schema": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "user_id": { "type": "string" },
-          "mailbox": { "type": "string" },
-          "offset": { "type": "integer", "minimum": 0 },
-          "limit": { "type": "integer", "minimum": 1, "maximum": 500 },
-          "permission": { "type": "string", "enum": ["none", "read", "draft", "send"] }
-        },
-        "required": ["user_id", "mailbox", "offset", "limit", "permission"]
-      },
-      "output_schema": { "type": "object" }
-    },
-    {
-      "name": "get_email",
-      "description": "Fetch a single email by identifier.",
-      "input_schema": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "user_id": { "type": "string" },
-          "email_id": { "type": "string" },
-          "permission": { "type": "string", "enum": ["none", "read", "draft", "send"] }
-        },
-        "required": ["user_id", "email_id", "permission"]
-      },
-      "output_schema": { "type": "object" }
-    },
-    {
-      "name": "draft_email",
-      "description": "Create a new draft email.",
-      "input_schema": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "user_id": { "type": "string" },
-          "to": { "type": "array", "items": { "type": "string", "format": "email" }, "minItems": 1 },
-          "cc": { "type": "array", "items": { "type": "string", "format": "email" } },
-          "bcc": { "type": "array", "items": { "type": "string", "format": "email" } },
-          "subject": { "type": "string", "maxLength": 1000 },
-          "body": { "type": "string" },
-          "permission": { "type": "string", "enum": ["none", "read", "draft", "send"] }
-        },
-        "required": ["user_id", "to", "subject", "body", "permission"]
-      },
-      "output_schema": { "type": "object" }
-    },
-    {
-      "name": "send_email",
-      "description": "Send an existing draft email.",
-      "input_schema": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "user_id": { "type": "string" },
-          "draft_id": { "type": "string" },
-          "permission": { "type": "string", "enum": ["none", "read", "draft", "send"] }
-        },
-        "required": ["user_id", "draft_id", "permission"]
-      },
-      "output_schema": { "type": "object" }
-    }
+    { "name": "list_accounts", "description": "List configured mail accounts.", "input_schema": { "type": "object", "properties": { "context": { "type": "object" }, "snapshot": { "type": "array" }, "refresh": { "type": "boolean" } }, "required": ["context"] }, "output_schema": { "type": "object" } },
+    { "name": "get_account_status", "description": "Get sync status for an account.", "input_schema": { "type": "object", "properties": { "context": { "type": "object" }, "account_id": { "type": "string" }, "snapshot": { "type": "object" }, "refresh": { "type": "boolean" } }, "required": ["context", "account_id"] }, "output_schema": { "type": "object" } },
+    { "name": "list_mailboxes", "description": "List folders for an account or unified inbox.", "input_schema": { "type": "object", "properties": { "context": { "type": "object" }, "account_id": { "type": "string" }, "snapshot": { "type": "array" }, "include_favorites": { "type": "boolean" }, "refresh": { "type": "boolean" } }, "required": ["context"] }, "output_schema": { "type": "object" } },
+    { "name": "read_emails", "description": "Read a paginated mailbox view.", "input_schema": { "type": "object", "properties": { "context": { "type": "object" }, "account_id": { "type": "string" }, "mailbox_id": { "type": "string" }, "pagination": { "type": "object" }, "sort": { "type": "object" }, "filters": { "type": "object" }, "thread_view": { "type": "boolean" }, "focused_inbox": { "type": "boolean" }, "snapshot": { "type": "object" }, "refresh": { "type": "boolean" } }, "required": ["context", "mailbox_id"] }, "output_schema": { "type": "object" } },
+    { "name": "search_emails", "description": "Search email across folders and accounts.", "input_schema": { "type": "object", "properties": { "context": { "type": "object" }, "query": { "type": "string" }, "pagination": { "type": "object" }, "filters": { "type": "object" }, "snapshot": { "type": "object" }, "refresh": { "type": "boolean" } }, "required": ["context", "query"] }, "output_schema": { "type": "object" } },
+    { "name": "get_email", "description": "Get a full email detail record.", "input_schema": { "type": "object", "properties": { "context": { "type": "object" }, "email_id": { "type": "string" }, "account_id": { "type": "string" }, "snapshot": { "type": "object" }, "mark_read": { "type": "boolean" }, "refresh": { "type": "boolean" } }, "required": ["context", "email_id"] }, "output_schema": { "type": "object" } },
+    { "name": "get_thread", "description": "Get a conversation thread.", "input_schema": { "type": "object", "properties": { "context": { "type": "object" }, "thread_id": { "type": "string" }, "account_id": { "type": "string" }, "snapshot": { "type": "array" }, "refresh": { "type": "boolean" } }, "required": ["context", "thread_id"] }, "output_schema": { "type": "object" } },
+    { "name": "mark_read", "description": "Mark emails read or unread.", "input_schema": { "type": "object", "properties": { "context": { "type": "object" }, "email_ids": { "type": "array" }, "read": { "type": "boolean" } }, "required": ["context", "email_ids", "read"] }, "output_schema": { "type": "object" } },
+    { "name": "flag_email", "description": "Flag or unflag emails.", "input_schema": { "type": "object", "properties": { "context": { "type": "object" }, "email_ids": { "type": "array" }, "flagged": { "type": "boolean" } }, "required": ["context", "email_ids", "flagged"] }, "output_schema": { "type": "object" } },
+    { "name": "draft_email", "description": "Create a new draft.", "input_schema": { "type": "object", "properties": { "context": { "type": "object" }, "draft": { "type": "object" }, "autocomplete_recipients": { "type": "boolean" } }, "required": ["context", "draft"] }, "output_schema": { "type": "object" } },
+    { "name": "update_draft", "description": "Update a draft.", "input_schema": { "type": "object", "properties": { "context": { "type": "object" }, "draft": { "type": "object" } }, "required": ["context", "draft"] }, "output_schema": { "type": "object" } },
+    { "name": "discard_draft", "description": "Discard a draft.", "input_schema": { "type": "object", "properties": { "context": { "type": "object" }, "draft_id": { "type": "string" }, "account_id": { "type": "string" } }, "required": ["context", "draft_id"] }, "output_schema": { "type": "object" } },
+    { "name": "send_email", "description": "Send an existing draft.", "input_schema": { "type": "object", "properties": { "context": { "type": "object" }, "draft_id": { "type": "string" }, "account_id": { "type": "string" }, "undo_window_seconds": { "type": "integer" }, "notify": { "type": "boolean" } }, "required": ["context", "draft_id", "account_id"] }, "output_schema": { "type": "object" } },
+    { "name": "reply_email", "description": "Reply or reply-all to a message.", "input_schema": { "type": "object", "properties": { "context": { "type": "object" }, "email_id": { "type": "string" }, "account_id": { "type": "string" }, "body_html": { "type": "string" }, "body_text": { "type": "string" }, "include_original": { "type": "boolean" }, "reply_all": { "type": "boolean" }, "send_now": { "type": "boolean" }, "undo_window_seconds": { "type": "integer" } }, "required": ["context", "email_id", "account_id"] }, "output_schema": { "type": "object" } },
+    { "name": "forward_email", "description": "Forward a message.", "input_schema": { "type": "object", "properties": { "context": { "type": "object" }, "email_id": { "type": "string" }, "account_id": { "type": "string" }, "to": { "type": "array" }, "cc": { "type": "array" }, "bcc": { "type": "array" }, "note_html": { "type": "string" }, "note_text": { "type": "string" }, "send_now": { "type": "boolean" }, "undo_window_seconds": { "type": "integer" } }, "required": ["context", "email_id", "account_id", "to"] }, "output_schema": { "type": "object" } },
+    { "name": "move_email", "description": "Move email to another folder.", "input_schema": { "type": "object", "properties": { "context": { "type": "object" }, "email_ids": { "type": "array" }, "destination_mailbox_id": { "type": "string" }, "account_id": { "type": "string" } }, "required": ["context", "email_ids", "destination_mailbox_id"] }, "output_schema": { "type": "object" } },
+    { "name": "delete_email", "description": "Delete or trash email.", "input_schema": { "type": "object", "properties": { "context": { "type": "object" }, "email_ids": { "type": "array" }, "account_id": { "type": "string" }, "permanent": { "type": "boolean" } }, "required": ["context", "email_ids"] }, "output_schema": { "type": "object" } },
+    { "name": "archive_email", "description": "Archive email.", "input_schema": { "type": "object", "properties": { "context": { "type": "object" }, "email_ids": { "type": "array" }, "account_id": { "type": "string" } }, "required": ["context", "email_ids"] }, "output_schema": { "type": "object" } },
+    { "name": "create_folder", "description": "Create a folder.", "input_schema": { "type": "object", "properties": { "context": { "type": "object" }, "account_id": { "type": "string" }, "name": { "type": "string" }, "parent_mailbox_id": { "type": "string" }, "favorite": { "type": "boolean" } }, "required": ["context", "account_id", "name"] }, "output_schema": { "type": "object" } },
+    { "name": "rename_folder", "description": "Rename a folder.", "input_schema": { "type": "object", "properties": { "context": { "type": "object" }, "account_id": { "type": "string" }, "mailbox_id": { "type": "string" }, "new_name": { "type": "string" } }, "required": ["context", "account_id", "mailbox_id", "new_name"] }, "output_schema": { "type": "object" } },
+    { "name": "delete_folder", "description": "Delete a folder.", "input_schema": { "type": "object", "properties": { "context": { "type": "object" }, "account_id": { "type": "string" }, "mailbox_id": { "type": "string" }, "force": { "type": "boolean" } }, "required": ["context", "account_id", "mailbox_id"] }, "output_schema": { "type": "object" } },
+    { "name": "get_unread_count", "description": "Get unread counts.", "input_schema": { "type": "object", "properties": { "context": { "type": "object" }, "account_id": { "type": "string" }, "snapshot": { "type": "array" }, "refresh": { "type": "boolean" } }, "required": ["context"] }, "output_schema": { "type": "object" } },
+    { "name": "create_rule", "description": "Create an automation rule.", "input_schema": { "type": "object", "properties": { "context": { "type": "object" }, "account_id": { "type": "string" }, "rule": { "type": "object" } }, "required": ["context", "account_id", "rule"] }, "output_schema": { "type": "object" } },
+    { "name": "list_rules", "description": "List automation rules.", "input_schema": { "type": "object", "properties": { "context": { "type": "object" }, "account_id": { "type": "string" }, "snapshot": { "type": "array" }, "refresh": { "type": "boolean" } }, "required": ["context", "account_id"] }, "output_schema": { "type": "object" } },
+    { "name": "delete_rule", "description": "Delete an automation rule.", "input_schema": { "type": "object", "properties": { "context": { "type": "object" }, "account_id": { "type": "string" }, "rule_id": { "type": "string" } }, "required": ["context", "account_id", "rule_id"] }, "output_schema": { "type": "object" } },
+    { "name": "schedule_send", "description": "Schedule a future send.", "input_schema": { "type": "object", "properties": { "context": { "type": "object" }, "draft_id": { "type": "string" }, "account_id": { "type": "string" }, "scheduled_for": { "type": "integer" }, "undo_window_seconds": { "type": "integer" } }, "required": ["context", "draft_id", "account_id", "scheduled_for"] }, "output_schema": { "type": "object" } },
+    { "name": "cancel_scheduled_send", "description": "Cancel a scheduled send.", "input_schema": { "type": "object", "properties": { "context": { "type": "object" }, "job_id": { "type": "string" }, "account_id": { "type": "string" }, "draft_id": { "type": "string" } }, "required": ["context", "job_id", "account_id"] }, "output_schema": { "type": "object" } }
   ],
   "ui": {
+    "entrypoint": "ui/dist/index.html",
     "contributions": [
-      {
-        "type": "navigation_item",
-        "id": "mail-client.nav",
-        "label": "Mail",
-        "target": "app://mail-client/inbox"
-      },
+      { "type": "navigation_item", "id": "mail-client.nav", "label": "Mail", "target": "app://mail-client/inbox" },
       {
         "type": "settings_panel",
-        "id": "mail-client.settings",
-        "label": "Mail Client",
+        "id": "mail-client.accounts",
+        "label": "Mail Accounts",
         "schema": {
           "type": "object",
+          "title": "Mail Accounts",
+          "x-ui-widget": "account-list-manager",
           "additionalProperties": false,
           "properties": {
-            "default_mailbox": { "type": "string", "default": "INBOX" },
-            "allow_agent_drafts": { "type": "boolean", "default": false }
+            "accounts": {
+              "type": "array",
+              "title": "Configured Accounts",
+              "x-ui-widget": "repeatable-group",
+              "items": {
+                "type": "object",
+                "title": "Mail Account",
+                "additionalProperties": false,
+                "properties": {
+                  "account_id": { "type": "string", "x-ui-hidden": true },
+                  "display_name": { "type": "string", "title": "Display Name" },
+                  "email_address": { "type": "string", "format": "email", "title": "Email Address" },
+                  "auth_method": {
+                    "type": "string",
+                    "title": "Authentication",
+                    "enum": ["password", "oauth2_google", "oauth2_microsoft"],
+                    "x-ui-labels": ["Password / App Password", "Google (OAuth2)", "Microsoft (OAuth2)"]
+                  },
+                  "imap_host": { "type": "string", "title": "IMAP Server", "x-ui-show-when": { "auth_method": "password" } },
+                  "imap_port": { "type": "integer", "title": "IMAP Port", "default": 993, "x-ui-show-when": { "auth_method": "password" } },
+                  "imap_tls": { "type": "boolean", "title": "IMAP TLS", "default": true, "x-ui-show-when": { "auth_method": "password" } },
+                  "smtp_host": { "type": "string", "title": "SMTP Server", "x-ui-show-when": { "auth_method": "password" } },
+                  "smtp_port": { "type": "integer", "title": "SMTP Port", "default": 587, "x-ui-show-when": { "auth_method": "password" } },
+                  "smtp_tls": { "type": "boolean", "title": "SMTP TLS (STARTTLS)", "default": true, "x-ui-show-when": { "auth_method": "password" } },
+                  "oauth2_connected": { "type": "boolean", "title": "Connected", "x-ui-readonly": true, "x-ui-show-when": { "auth_method": ["oauth2_google", "oauth2_microsoft"] } },
+                  "sync_interval_minutes": { "type": "integer", "title": "Sync Every (minutes)", "default": 5, "minimum": 1, "maximum": 60 },
+                  "signature": { "type": "string", "title": "Email Signature", "x-ui-widget": "rich-text" },
+                  "is_default": { "type": "boolean", "title": "Default Account", "default": false },
+                  "enabled": { "type": "boolean", "title": "Account Active", "default": true }
+                },
+                "required": ["display_name", "email_address", "auth_method"]
+              }
+            },
+            "general": {
+              "type": "object",
+              "title": "General Settings",
+              "additionalProperties": false,
+              "properties": {
+                "undo_send_delay_seconds": { "type": "integer", "title": "Undo Send Window", "enum": [0, 5, 10, 30], "default": 10 },
+                "preview_pane": { "type": "string", "title": "Preview Pane", "enum": ["right", "bottom", "off"], "default": "right" },
+                "emails_per_page": { "type": "integer", "title": "Emails Per Page", "enum": [25, 50, 100], "default": 50 },
+                "thread_view": { "type": "boolean", "title": "Group by Conversation", "default": true },
+                "focused_inbox": { "type": "boolean", "title": "Focused Inbox", "default": true },
+                "notifications_enabled": { "type": "boolean", "title": "New Mail Notifications", "default": true }
+              }
+            }
           }
         }
       }
@@ -136,6 +115,6 @@
   },
   "resource_limits": {
     "memory_bytes": 67108864,
-    "timeout_ms": 3000
+    "timeout_ms": 4000
   }
 }

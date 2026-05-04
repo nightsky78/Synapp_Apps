@@ -45,5 +45,13 @@ if entry.is_absolute() or ".." in entry.parts or str(entry).startswith("~"):
     raise SystemExit("entrypoint path is not package-safe")
 PY
 
-(cd "$APP_DIR" && tar --sort=name --mtime='UTC 2026-01-01' --owner=0 --group=0 --numeric-owner -czf "$OUT" synapp.app.json "$ENTRYPOINT")
+PACKAGE_FILES=("synapp.app.json" "$ENTRYPOINT")
+if [[ -f "$APP_DIR/plugin.json" ]]; then
+  PACKAGE_FILES+=("plugin.json")
+fi
+if [[ -f "$APP_DIR/README.md" ]]; then
+  PACKAGE_FILES+=("README.md")
+fi
+
+(cd "$APP_DIR" && tar --sort=name --mtime='UTC 2026-01-01' --owner=0 --group=0 --numeric-owner -czf "$OUT" "${PACKAGE_FILES[@]}")
 sha256sum "$OUT"

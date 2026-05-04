@@ -13,10 +13,16 @@ Every application in this repository must be built using our strict Dual-Interfa
 * **The Execution Interface:** The compiled `.wasm` binary containing pure, highly performant business logic (e.g., `Calendar`).
 * **The Semantic Interface:** A `plugin.json` manifest that sits alongside the source code. This acts as an AI Tool Manifest, describing the Wasm functions in plain English and JSON Schema so the AI broker understands how to use them.
 
+> **Critical:** Dual-Interface means the app serves **two consumers simultaneously and equally**:
+> 1. **Human users** — via a fully functional frontend UI (React, Web Components, or equivalent) that a person opens in their browser. Every user-facing feature must be accessible through the UI.
+> 2. **AI agents** — via the Wasm exports and `plugin.json` tool manifest that the Synapp Host Broker exposes to autonomous agents.
+>
+> Building only the Wasm/AI layer is **incomplete**. An app without a human UI is not a Synapp app — it is only half of one. The Wasm backend and the frontend UI are both mandatory deliverables, not optional.
+
 ## 3. Strict Development Rules
 Whenever you generate code, plan a feature, or refactor logic in this repository, you must strictly adhere to the following constraints:
 
-1. **The Dual-Interface Rule:** Every app must expose its logic via Wasm exports (Execution Interface) and document it strictly in a local `plugin.json` (Semantic Interface). One cannot exist without the other.
+1. **The Dual-Interface Rule:** Every app must deliver three things together — a human-facing frontend UI, Wasm exports (Execution Interface), and a `plugin.json` (Semantic Interface). None of the three can be omitted. The Wasm sandboxing constraint (rules 3 and 4 below) describes *how* the backend must be built — it does not reduce the scope of the app. A sandboxed Wasm executor still requires a full frontend UI for human users.
 2. **Zero AI Logic in Apps (Dumb Executors):** Wasm apps must NEVER contain LLM prompts, OpenAI SDKs, LangChain logic, or AI routing mechanisms. They are dumb, highly efficient executors of business logic. The platform handles the intelligence; the app handles the execution.
 3. **Strict Wasm Compilation:** All source code (Rust or Go) must be written exclusively to compile to the `wasm32-wasip1` (WASI Preview 1) or `wasm32-unknown-unknown` target. Do not use libraries that rely on native OS threads or C-bindings that cannot compile to WebAssembly.
 4. **State & Network Isolation:** Apps must not open direct raw TCP/UDP network connections to databases (like PostgreSQL or Redis). They must remain perfectly sandboxed. If an app needs to persist data, it must use the gRPC/WASI host interfaces provided by the Synapp Broker.
@@ -24,6 +30,8 @@ Whenever you generate code, plan a feature, or refactor logic in this repository
 
 ## 4. Your Workflow
 When asked to build or modify an app:
-1. **Design First:** Always ensure the `plugin.json` schema is defined before writing the implementation.
-2. **Implement:** Write the Rust/Go code adhering to the `wasm32-wasip1` constraints.
-3. **Verify:** Ensure the code is self-contained and the Wasm exports match the Semantic Interface exactly.
+1. **Design First:** Define the `plugin.json` schema AND the UI layout/screens before writing any implementation code.
+2. **Implement — Frontend:** Build the human-facing UI (React, Web Components, or equivalent). Every operation exposed via Wasm must have a corresponding UI surface that a human can interact with.
+3. **Implement — Backend:** Write the Rust/Go Wasm code adhering to the `wasm32-wasip1` constraints.
+4. **Wire Together:** Register the UI entrypoint in `synapp.app.json` under `ui.entrypoint` so the Synapp Host knows where to load the frontend from.
+5. **Verify:** Ensure the Wasm exports match the Semantic Interface exactly, and that every Wasm operation is reachable from the frontend UI.

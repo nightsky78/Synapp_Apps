@@ -6,7 +6,7 @@ This repository is the GitHub-backed curated app catalog for the **Synapp Omni-C
 
 | App | Description | Docs |
 |---|---|---|
-| **Mail Client** | AI-native email management: read, search, draft, send, organize. 8 Wasm exports with hierarchical permission model. | [Release Notes](docs/mail-client/RELEASE.md) |
+| **Mail Client** | Full mail workflow app with account-aware reading, search, compose, send, scheduling, organization, and automation tools for humans and agents. | [App README](apps/first-party/mail-client/README.md) |
 | **DummyPlugin** | Minimal reference implementation for the Dual-Interface pattern. | — |
 
 ## Repository Layout

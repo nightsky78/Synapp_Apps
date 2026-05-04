@@ -1,831 +1,210 @@
 {
   "name": "MailClient",
-  "version": "1.0.0",
-  "description": "AI-native email client for Synapp platform. Unified interface for human UI and autonomous agents to read, draft, send, and organize emails with granular permission gating.",
+  "version": "2.1.0",
+  "description": "Production Synapp mail client. The Wasm module is a pure planner and validator for human UI flows and AI tool invocations; the host owns account settings, protocol I/O, scheduling, and persistence.",
   "executionInterface": {
     "wasmTarget": "wasm32-wasip1",
     "wasmPath": "target/wasm32-wasip1/release/mail_client.wasm",
+    "memoryManagement": {
+      "returnedStringsAreNullTerminated": true,
+      "deallocatorExport": "free_string",
+      "inputEncoding": "utf-8-json"
+    },
+    "requestEnvelope": {
+      "$ref": "#/definitions/RequestEnvelope"
+    },
     "exports": [
-      {
-        "name": "read_emails",
-        "description": "Fetch paginated list of emails from a specified mailbox",
-        "inputSchema": {
-          "type": "object",
-          "properties": {
-            "user_id": {
-              "type": "string",
-              "description": "Authenticated user identifier"
-            },
-            "mailbox": {
-              "type": "string",
-              "description": "Folder identifier (INBOX, SENT, DRAFTS, TRASH, JUNK, ARCHIVE, or custom folder_id)",
-              "examples": ["INBOX", "SENT", "custom_folder_1"]
-            },
-            "offset": {
-              "type": "integer",
-              "minimum": 0,
-              "description": "Pagination offset (0-indexed)"
-            },
-            "limit": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 500,
-              "description": "Max emails to return"
-            },
-            "permission": {
-              "type": "string",
-              "enum": ["none", "read", "draft", "send"],
-              "description": "Agent permission level"
-            }
-          },
-          "required": ["user_id", "mailbox", "offset", "limit", "permission"]
-        },
-        "outputSchema": {
-          "type": "object",
-          "oneOf": [
-            {
-              "type": "object",
-              "properties": {
-                "ok": {
-                  "type": "object",
-                  "properties": {
-                    "emails": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/definitions/Email"
-                      },
-                      "description": "List of emails"
-                    },
-                    "total_count": {
-                      "type": "integer",
-                      "description": "Total emails in mailbox (for pagination UI)"
-                    },
-                    "has_more": {
-                      "type": "boolean",
-                      "description": "Whether more emails exist beyond limit"
-                    }
-                  },
-                  "required": ["emails", "total_count", "has_more"]
-                }
-              },
-              "required": ["ok"]
-            },
-            {
-              "type": "object",
-              "properties": {
-                "err": {
-                  "$ref": "#/definitions/Error"
-                }
-              },
-              "required": ["err"]
-            }
-          ]
-        }
-      },
-      {
-        "name": "get_email",
-        "description": "Fetch a single email by ID, including full body and metadata",
-        "inputSchema": {
-          "type": "object",
-          "properties": {
-            "user_id": {
-              "type": "string",
-              "description": "Authenticated user identifier"
-            },
-            "email_id": {
-              "type": "string",
-              "description": "Unique email identifier"
-            },
-            "permission": {
-              "type": "string",
-              "enum": ["none", "read", "draft", "send"],
-              "description": "Agent permission level"
-            }
-          },
-          "required": ["user_id", "email_id", "permission"]
-        },
-        "outputSchema": {
-          "type": "object",
-          "oneOf": [
-            {
-              "type": "object",
-              "properties": {
-                "ok": {
-                  "$ref": "#/definitions/Email"
-                }
-              },
-              "required": ["ok"]
-            },
-            {
-              "type": "object",
-              "properties": {
-                "err": {
-                  "$ref": "#/definitions/Error"
-                }
-              },
-              "required": ["err"]
-            }
-          ]
-        }
-      },
-      {
-        "name": "draft_email",
-        "description": "Create a new email draft (not sent)",
-        "inputSchema": {
-          "type": "object",
-          "properties": {
-            "user_id": {
-              "type": "string",
-              "description": "Authenticated user identifier"
-            },
-            "to": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "format": "email"
-              },
-              "minItems": 1,
-              "description": "Primary recipients"
-            },
-            "cc": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "format": "email"
-              },
-              "description": "Carbon copy recipients (optional)"
-            },
-            "bcc": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "format": "email"
-              },
-              "description": "Blind carbon copy recipients (optional)"
-            },
-            "subject": {
-              "type": "string",
-              "maxLength": 1000,
-              "description": "Email subject line"
-            },
-            "body": {
-              "type": "string",
-              "description": "Email body (HTML or plain text)"
-            },
-            "permission": {
-              "type": "string",
-              "enum": ["none", "read", "draft", "send"],
-              "description": "Agent permission level"
-            }
-          },
-          "required": ["user_id", "to", "subject", "body", "permission"]
-        },
-        "outputSchema": {
-          "type": "object",
-          "oneOf": [
-            {
-              "type": "object",
-              "properties": {
-                "ok": {
-                  "$ref": "#/definitions/Draft"
-                }
-              },
-              "required": ["ok"]
-            },
-            {
-              "type": "object",
-              "properties": {
-                "err": {
-                  "$ref": "#/definitions/Error"
-                }
-              },
-              "required": ["err"]
-            }
-          ]
-        }
-      },
-      {
-        "name": "send_email",
-        "description": "Send a draft email to recipients. Transitions draft from DRAFTS to SENT folder.",
-        "inputSchema": {
-          "type": "object",
-          "properties": {
-            "user_id": {
-              "type": "string",
-              "description": "Authenticated user identifier"
-            },
-            "draft_id": {
-              "type": "string",
-              "description": "Draft identifier from draft_email()"
-            },
-            "permission": {
-              "type": "string",
-              "enum": ["none", "read", "draft", "send"],
-              "description": "Agent permission level"
-            }
-          },
-          "required": ["user_id", "draft_id", "permission"]
-        },
-        "outputSchema": {
-          "type": "object",
-          "oneOf": [
-            {
-              "type": "object",
-              "properties": {
-                "ok": {
-                  "type": "object",
-                  "properties": {
-                    "email_id": {
-                      "type": "string",
-                      "description": "ID of sent email"
-                    },
-                    "sent_at": {
-                      "type": "integer",
-                      "description": "Unix timestamp when sent"
-                    }
-                  },
-                  "required": ["email_id", "sent_at"]
-                }
-              },
-              "required": ["ok"]
-            },
-            {
-              "type": "object",
-              "properties": {
-                "err": {
-                  "$ref": "#/definitions/Error"
-                }
-              },
-              "required": ["err"]
-            }
-          ]
-        }
-      },
-      {
-        "name": "list_folders",
-        "description": "Enumerate all folders for the user",
-        "inputSchema": {
-          "type": "object",
-          "properties": {
-            "user_id": {
-              "type": "string",
-              "description": "Authenticated user identifier"
-            },
-            "permission": {
-              "type": "string",
-              "enum": ["none", "read", "draft", "send"],
-              "description": "Agent permission level"
-            }
-          },
-          "required": ["user_id", "permission"]
-        },
-        "outputSchema": {
-          "type": "object",
-          "oneOf": [
-            {
-              "type": "object",
-              "properties": {
-                "ok": {
-                  "type": "object",
-                  "properties": {
-                    "folders": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/definitions/Folder"
-                      }
-                    }
-                  },
-                  "required": ["folders"]
-                }
-              },
-              "required": ["ok"]
-            },
-            {
-              "type": "object",
-              "properties": {
-                "err": {
-                  "$ref": "#/definitions/Error"
-                }
-              },
-              "required": ["err"]
-            }
-          ]
-        }
-      },
-      {
-        "name": "move_email",
-        "description": "Move an email from one folder to another",
-        "inputSchema": {
-          "type": "object",
-          "properties": {
-            "user_id": {
-              "type": "string",
-              "description": "Authenticated user identifier"
-            },
-            "email_id": {
-              "type": "string",
-              "description": "Email to move"
-            },
-            "target_folder_id": {
-              "type": "string",
-              "description": "Destination folder identifier"
-            },
-            "permission": {
-              "type": "string",
-              "enum": ["none", "read", "draft", "send"],
-              "description": "Agent permission level"
-            }
-          },
-          "required": ["user_id", "email_id", "target_folder_id", "permission"]
-        },
-        "outputSchema": {
-          "type": "object",
-          "oneOf": [
-            {
-              "type": "object",
-              "properties": {
-                "ok": {
-                  "type": "null",
-                  "description": "Success (no data returned)"
-                }
-              },
-              "required": ["ok"]
-            },
-            {
-              "type": "object",
-              "properties": {
-                "err": {
-                  "$ref": "#/definitions/Error"
-                }
-              },
-              "required": ["err"]
-            }
-          ]
-        }
-      },
-      {
-        "name": "search_emails",
-        "description": "Full-text search across emails matching query string",
-        "inputSchema": {
-          "type": "object",
-          "properties": {
-            "user_id": {
-              "type": "string",
-              "description": "Authenticated user identifier"
-            },
-            "query": {
-              "type": "string",
-              "description": "Search expression (free-form text or operators like from:, to:, subject:, before:, after:, is:, has:)"
-            },
-            "limit": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 500,
-              "description": "Max results to return"
-            },
-            "permission": {
-              "type": "string",
-              "enum": ["none", "read", "draft", "send"],
-              "description": "Agent permission level"
-            }
-          },
-          "required": ["user_id", "query", "limit", "permission"]
-        },
-        "outputSchema": {
-          "type": "object",
-          "oneOf": [
-            {
-              "type": "object",
-              "properties": {
-                "ok": {
-                  "type": "object",
-                  "properties": {
-                    "emails": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/definitions/Email"
-                      }
-                    },
-                    "matched_count": {
-                      "type": "integer",
-                      "description": "Total matches (may exceed limit)"
-                    },
-                    "has_more": {
-                      "type": "boolean"
-                    }
-                  },
-                  "required": ["emails", "matched_count", "has_more"]
-                }
-              },
-              "required": ["ok"]
-            },
-            {
-              "type": "object",
-              "properties": {
-                "err": {
-                  "$ref": "#/definitions/Error"
-                }
-              },
-              "required": ["err"]
-            }
-          ]
-        }
-      },
-      {
-        "name": "get_agent_permissions",
-        "description": "Query the current agent's permission level",
-        "inputSchema": {
-          "type": "object",
-          "properties": {
-            "user_id": {
-              "type": "string",
-              "description": "Authenticated user identifier"
-            },
-            "permission": {
-              "type": "string",
-              "enum": ["none", "read", "draft", "send"],
-              "description": "Current agent permission level (provided by host)"
-            }
-          },
-          "required": ["user_id", "permission"]
-        },
-        "outputSchema": {
-          "type": "object",
-          "properties": {
-            "permission_level": {
-              "type": "string",
-              "enum": ["none", "read", "draft", "send"]
-            },
-            "user_id": {
-              "type": "string"
-            },
-            "agent_id": {
-              "type": "string",
-              "description": "Requesting agent identifier"
-            },
-            "granted_at": {
-              "type": "integer",
-              "description": "Unix timestamp"
-            },
-            "expires_at": {
-              "type": "integer",
-              "description": "Unix timestamp (0 = never expires)"
-            }
-          },
-          "required": ["permission_level", "user_id", "agent_id", "granted_at", "expires_at"]
-        }
-      }
+      { "name": "list_accounts", "description": "List configured mail accounts from host-managed settings without exposing secrets.", "inputSchema": { "$ref": "#/definitions/ListAccountsInput" }, "outputSchema": { "$ref": "#/definitions/ResultEnvelope" } },
+      { "name": "get_account_status", "description": "Get sync and connection status for a configured account.", "inputSchema": { "$ref": "#/definitions/GetAccountStatusInput" }, "outputSchema": { "$ref": "#/definitions/ResultEnvelope" } },
+      { "name": "list_mailboxes", "description": "List standard and custom folders for one account or the unified inbox.", "inputSchema": { "$ref": "#/definitions/ListMailboxesInput" }, "outputSchema": { "$ref": "#/definitions/ResultEnvelope" } },
+      { "name": "read_emails", "description": "Fetch a paginated email list for a mailbox, including thread mode, focused inbox, filters, and sort state.", "inputSchema": { "$ref": "#/definitions/ReadEmailsInput" }, "outputSchema": { "$ref": "#/definitions/ResultEnvelope" } },
+      { "name": "search_emails", "description": "Run a full-text mail search with structured filters.", "inputSchema": { "$ref": "#/definitions/SearchEmailsInput" }, "outputSchema": { "$ref": "#/definitions/ResultEnvelope" } },
+      { "name": "get_email", "description": "Fetch one email with full bodies, attachment metadata, and optional mark-read planning.", "inputSchema": { "$ref": "#/definitions/GetEmailInput" }, "outputSchema": { "$ref": "#/definitions/ResultEnvelope" } },
+      { "name": "get_thread", "description": "Fetch a full conversation thread ordered for reading-pane rendering or agent inspection.", "inputSchema": { "$ref": "#/definitions/GetThreadInput" }, "outputSchema": { "$ref": "#/definitions/ResultEnvelope" } },
+      { "name": "mark_read", "description": "Mark one or more emails read or unread.", "inputSchema": { "$ref": "#/definitions/MarkReadInput" }, "outputSchema": { "$ref": "#/definitions/ResultEnvelope" } },
+      { "name": "flag_email", "description": "Flag or unflag emails for follow-up.", "inputSchema": { "$ref": "#/definitions/FlagEmailInput" }, "outputSchema": { "$ref": "#/definitions/ResultEnvelope" } },
+      { "name": "draft_email", "description": "Create a draft with rich body content, recipients, attachments, and signature metadata.", "inputSchema": { "$ref": "#/definitions/DraftEmailInput" }, "outputSchema": { "$ref": "#/definitions/ResultEnvelope" } },
+      { "name": "update_draft", "description": "Update an existing draft in the host draft store.", "inputSchema": { "$ref": "#/definitions/UpdateDraftInput" }, "outputSchema": { "$ref": "#/definitions/ResultEnvelope" } },
+      { "name": "discard_draft", "description": "Delete a draft and clear local compose state.", "inputSchema": { "$ref": "#/definitions/DiscardDraftInput" }, "outputSchema": { "$ref": "#/definitions/ResultEnvelope" } },
+      { "name": "send_email", "description": "Send a draft through the selected account with undo-send handling.", "inputSchema": { "$ref": "#/definitions/SendEmailInput" }, "outputSchema": { "$ref": "#/definitions/ResultEnvelope" } },
+      { "name": "reply_email", "description": "Compose or send a reply or reply-all from an existing message.", "inputSchema": { "$ref": "#/definitions/ReplyEmailInput" }, "outputSchema": { "$ref": "#/definitions/ResultEnvelope" } },
+      { "name": "forward_email", "description": "Compose or send a forward with explicit recipients and message note.", "inputSchema": { "$ref": "#/definitions/ForwardEmailInput" }, "outputSchema": { "$ref": "#/definitions/ResultEnvelope" } },
+      { "name": "move_email", "description": "Move emails to another mailbox or custom folder.", "inputSchema": { "$ref": "#/definitions/MoveEmailInput" }, "outputSchema": { "$ref": "#/definitions/ResultEnvelope" } },
+      { "name": "delete_email", "description": "Move emails to Trash or permanently delete them.", "inputSchema": { "$ref": "#/definitions/DeleteEmailInput" }, "outputSchema": { "$ref": "#/definitions/ResultEnvelope" } },
+      { "name": "archive_email", "description": "Move emails into the Archive mailbox.", "inputSchema": { "$ref": "#/definitions/ArchiveEmailInput" }, "outputSchema": { "$ref": "#/definitions/ResultEnvelope" } },
+      { "name": "create_folder", "description": "Create a custom folder in an account mailbox tree.", "inputSchema": { "$ref": "#/definitions/CreateFolderInput" }, "outputSchema": { "$ref": "#/definitions/ResultEnvelope" } },
+      { "name": "rename_folder", "description": "Rename an existing custom folder.", "inputSchema": { "$ref": "#/definitions/RenameFolderInput" }, "outputSchema": { "$ref": "#/definitions/ResultEnvelope" } },
+      { "name": "delete_folder", "description": "Delete a custom folder, optionally forcing when children or messages exist.", "inputSchema": { "$ref": "#/definitions/DeleteFolderInput" }, "outputSchema": { "$ref": "#/definitions/ResultEnvelope" } },
+      { "name": "get_unread_count", "description": "Return unread counters per mailbox for one account or the unified inbox.", "inputSchema": { "$ref": "#/definitions/GetUnreadCountInput" }, "outputSchema": { "$ref": "#/definitions/ResultEnvelope" } },
+      { "name": "create_rule", "description": "Create a mail automation rule with ordered conditions and actions.", "inputSchema": { "$ref": "#/definitions/CreateRuleInput" }, "outputSchema": { "$ref": "#/definitions/ResultEnvelope" } },
+      { "name": "list_rules", "description": "List mail rules for an account.", "inputSchema": { "$ref": "#/definitions/ListRulesInput" }, "outputSchema": { "$ref": "#/definitions/ResultEnvelope" } },
+      { "name": "delete_rule", "description": "Delete a stored mail automation rule.", "inputSchema": { "$ref": "#/definitions/DeleteRuleInput" }, "outputSchema": { "$ref": "#/definitions/ResultEnvelope" } },
+      { "name": "schedule_send", "description": "Queue a draft for future delivery.", "inputSchema": { "$ref": "#/definitions/ScheduleSendInput" }, "outputSchema": { "$ref": "#/definitions/ResultEnvelope" } },
+      { "name": "cancel_scheduled_send", "description": "Cancel a queued send job and restore draft editability.", "inputSchema": { "$ref": "#/definitions/CancelScheduledSendInput" }, "outputSchema": { "$ref": "#/definitions/ResultEnvelope" } }
     ]
   },
   "semanticInterface": {
     "tools": [
-      {
-        "name": "read_emails",
-        "description": "Retrieve emails from a specific folder with pagination. Returns a list of Email objects sorted by received_at (newest first).",
-        "category": "query",
-        "permissionLevel": "read",
-        "examples": [
-          {
-            "description": "Fetch first 20 unread emails from inbox",
-            "input": {
-              "user_id": "user_123",
-              "mailbox": "INBOX",
-              "offset": 0,
-              "limit": 20,
-              "permission": "read"
-            }
-          }
-        ]
-      },
-      {
-        "name": "get_email",
-        "description": "Fetch a single email by ID, including full body and all metadata. Marks email as read.",
-        "category": "query",
-        "permissionLevel": "read",
-        "examples": [
-          {
-            "description": "Retrieve full content of a specific email",
-            "input": {
-              "user_id": "user_123",
-              "email_id": "email_abc123",
-              "permission": "read"
-            }
-          }
-        ]
-      },
-      {
-        "name": "draft_email",
-        "description": "Create a new email draft with recipients, subject, and body. Returns draft_id for later sending or modification.",
-        "category": "mutation",
-        "permissionLevel": "draft",
-        "examples": [
-          {
-            "description": "Create a draft email to a single recipient",
-            "input": {
-              "user_id": "user_123",
-              "to": ["recipient@company.com"],
-              "cc": [],
-              "bcc": [],
-              "subject": "Project Update",
-              "body": "Here is the latest status...",
-              "permission": "draft"
-            }
-          }
-        ]
-      },
-      {
-        "name": "send_email",
-        "description": "Send a draft email. Moves draft from DRAFTS to SENT folder and dispatches to recipients. Requires send permission.",
-        "category": "mutation",
-        "permissionLevel": "send",
-        "examples": [
-          {
-            "description": "Send a previously drafted email",
-            "input": {
-              "user_id": "user_123",
-              "draft_id": "draft_xyz789",
-              "permission": "send"
-            }
-          }
-        ]
-      },
-      {
-        "name": "list_folders",
-        "description": "Enumerate all folders in the user's mailbox, including system folders (INBOX, SENT, DRAFTS, etc.) and custom folders.",
-        "category": "query",
-        "permissionLevel": "read",
-        "examples": [
-          {
-            "description": "List all available folders",
-            "input": {
-              "user_id": "user_123",
-              "permission": "read"
-            }
-          }
-        ]
-      },
-      {
-        "name": "move_email",
-        "description": "Move an email to a different folder. Can move to standard folders or custom user-created folders.",
-        "category": "mutation",
-        "permissionLevel": "draft",
-        "examples": [
-          {
-            "description": "Move email to trash",
-            "input": {
-              "user_id": "user_123",
-              "email_id": "email_abc123",
-              "target_folder_id": "trash",
-              "permission": "send"
-            }
-          }
-        ]
-      },
-      {
-        "name": "search_emails",
-        "description": "Full-text search across user's emails. Supports query operators like from:, to:, subject:, before:, after:, is:unread, has:attachment",
-        "category": "query",
-        "permissionLevel": "read",
-        "examples": [
-          {
-            "description": "Search for emails from a specific sender",
-            "input": {
-              "user_id": "user_123",
-              "query": "from:alice@company.com",
-              "limit": 50,
-              "permission": "read"
-            }
-          }
-        ]
-      },
-      {
-        "name": "get_agent_permissions",
-        "description": "Introspect the current agent's permission level. Useful for conditional logic: if permission == 'send' then send_email() else draft_email()",
-        "category": "query",
-        "permissionLevel": "none",
-        "examples": [
-          {
-            "description": "Check agent capabilities before proceeding",
-            "input": {
-              "user_id": "user_123",
-              "permission": "send"
-            }
-          }
-        ]
-      }
+      { "name": "list_accounts", "description": "Inspect which user-approved accounts exist and which one is the default.", "category": "query", "capability": "mail:read" },
+      { "name": "get_account_status", "description": "Inspect account health, sync freshness, and connection state.", "category": "query", "capability": "mail:read" },
+      { "name": "list_mailboxes", "description": "List folders and unread counts for navigation or planning moves.", "category": "query", "capability": "mail:read" },
+      { "name": "read_emails", "description": "Read a paginated mailbox view with structured filters and threading options.", "category": "query", "capability": "mail:read" },
+      { "name": "search_emails", "description": "Search across accounts and folders with structured filters.", "category": "query", "capability": "mail:read" },
+      { "name": "get_email", "description": "Retrieve one message body, headers, and attachments.", "category": "query", "capability": "mail:read" },
+      { "name": "get_thread", "description": "Load an entire conversation thread.", "category": "query", "capability": "mail:read" },
+      { "name": "mark_read", "description": "Mark messages read or unread.", "category": "mutation", "capability": "mail:read" },
+      { "name": "flag_email", "description": "Flag messages for follow-up or clear the flag.", "category": "mutation", "capability": "mail:organize" },
+      { "name": "draft_email", "description": "Create a new rich-text draft.", "category": "mutation", "capability": "mail:draft" },
+      { "name": "update_draft", "description": "Revise an existing draft.", "category": "mutation", "capability": "mail:draft" },
+      { "name": "discard_draft", "description": "Delete a draft and abandon compose state.", "category": "mutation", "capability": "mail:draft" },
+      { "name": "send_email", "description": "Send a draft using the selected account.", "category": "mutation", "capability": "mail:send" },
+      { "name": "reply_email", "description": "Reply or reply-all to a message, as draft or immediate send.", "category": "mutation", "capability": "mail:send" },
+      { "name": "forward_email", "description": "Forward a message with explicit recipients.", "category": "mutation", "capability": "mail:send" },
+      { "name": "move_email", "description": "Move messages between folders.", "category": "mutation", "capability": "mail:organize" },
+      { "name": "delete_email", "description": "Trash or permanently delete messages.", "category": "mutation", "capability": "mail:organize" },
+      { "name": "archive_email", "description": "Archive selected messages.", "category": "mutation", "capability": "mail:organize" },
+      { "name": "create_folder", "description": "Create a custom folder.", "category": "mutation", "capability": "mail:organize" },
+      { "name": "rename_folder", "description": "Rename a custom folder.", "category": "mutation", "capability": "mail:organize" },
+      { "name": "delete_folder", "description": "Delete a custom folder.", "category": "mutation", "capability": "mail:organize" },
+      { "name": "get_unread_count", "description": "Get unread counts per folder.", "category": "query", "capability": "mail:read" },
+      { "name": "create_rule", "description": "Create an automation rule.", "category": "mutation", "capability": "mail:organize" },
+      { "name": "list_rules", "description": "List automation rules.", "category": "query", "capability": "mail:organize" },
+      { "name": "delete_rule", "description": "Delete an automation rule.", "category": "mutation", "capability": "mail:organize" },
+      { "name": "schedule_send", "description": "Schedule a draft for future delivery.", "category": "mutation", "capability": "mail:send" },
+      { "name": "cancel_scheduled_send", "description": "Cancel a queued send job.", "category": "mutation", "capability": "mail:send" }
     ]
   },
-  "capabilities": {
-    "maxRecipientsPerEmail": 100,
-    "maxSubjectLength": 1000,
-    "maxEmailSize": 25000000,
-    "paginationLimit": 500,
-    "draftExpiryDays": 7,
-    "trashRetentionDays": 30,
-    "searchTimeout": 10
+  "hostEffects": {
+    "required": [
+      "AccountCredentialRead",
+      "AccountCredentialWrite",
+      "ImapFetch",
+      "ImapSync",
+      "SmtpSend",
+      "ContactLookup",
+      "NotifyUser",
+      "ScheduleJob",
+      "CancelJob",
+      "StorePlatformSecret",
+      "MailStoreRead",
+      "MailStoreWrite",
+      "MailStoreDelete"
+    ],
+    "notes": "Mail account secrets and OAuth state are host-managed. The Wasm module validates requests, normalizes payloads, and returns effect plans; it never performs direct IMAP/SMTP/OAuth traffic."
   },
   "definitions": {
-    "Email": {
+    "RequestEnvelope": {
       "type": "object",
+      "additionalProperties": true,
+      "required": ["context"],
       "properties": {
-        "id": {
-          "type": "string",
-          "description": "Unique email identifier"
-        },
-        "message_id": {
-          "type": "string",
-          "description": "RFC 5322 Message-ID"
-        },
-        "user_id": {
-          "type": "string",
-          "description": "Owner user ID"
-        },
-        "from": {
-          "type": "string",
-          "format": "email",
-          "description": "Sender email address"
-        },
-        "to": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "format": "email"
-          },
-          "description": "Recipient addresses"
-        },
-        "cc": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "format": "email"
-          },
-          "description": "Carbon copy addresses"
-        },
-        "bcc": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "format": "email"
-          },
-          "description": "Blind carbon copy addresses"
-        },
-        "subject": {
-          "type": "string",
-          "description": "Email subject"
-        },
-        "body": {
-          "type": "string",
-          "description": "Email body (HTML or plain text)"
-        },
-        "received_at": {
-          "type": "integer",
-          "description": "Unix timestamp (seconds)"
-        },
-        "sent_at": {
-          "type": "integer",
-          "description": "Unix timestamp (0 if draft)"
-        },
-        "is_read": {
-          "type": "boolean",
-          "description": "Read/unread status"
-        },
-        "folder_id": {
-          "type": "string",
-          "description": "Current folder"
-        },
-        "thread_id": {
-          "type": "string",
-          "description": "Thread grouping identifier"
-        },
-        "has_attachments": {
-          "type": "boolean"
-        },
-        "importance": {
-          "type": "string",
-          "enum": ["low", "normal", "high"]
+        "context": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["user_id", "permission", "available_effects"],
+          "properties": {
+            "user_id": { "type": "string", "minLength": 1 },
+            "permission": { "type": "string", "enum": ["none", "read", "draft", "send", "organize"] },
+            "available_effects": { "type": "array", "items": { "type": "string" } },
+            "agent_id": { "type": "string" },
+            "request_id": { "type": "string" }
+          }
         }
-      },
-      "required": [
-        "id",
-        "message_id",
-        "user_id",
-        "from",
-        "to",
-        "subject",
-        "body",
-        "received_at",
-        "sent_at",
-        "is_read",
-        "folder_id",
-        "thread_id",
-        "has_attachments",
-        "importance"
+      }
+    },
+    "ResultEnvelope": {
+      "type": "object",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["ok"],
+          "properties": {
+            "ok": {
+              "type": "object",
+              "required": ["operation", "status", "data", "host_effects"],
+              "properties": {
+                "operation": { "type": "string" },
+                "status": { "type": "string", "enum": ["accepted"] },
+                "data": { "type": "object" },
+                "host_effects": { "type": "array", "items": { "$ref": "#/definitions/HostEffect" } },
+                "warnings": { "type": "array", "items": { "$ref": "#/definitions/Warning" } }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["err"],
+          "properties": {
+            "err": { "$ref": "#/definitions/Error" }
+          }
+        }
       ]
     },
-    "Draft": {
+    "HostEffect": {
       "type": "object",
+      "required": ["effect", "intent", "payload", "idempotency_key"],
       "properties": {
-        "draft_id": {
-          "type": "string",
-          "description": "Unique draft identifier"
-        },
-        "to": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "format": "email"
-          }
-        },
-        "cc": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "format": "email"
-          }
-        },
-        "bcc": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "format": "email"
-          }
-        },
-        "subject": {
-          "type": "string"
-        },
-        "body": {
-          "type": "string"
-        },
-        "created_at": {
-          "type": "integer",
-          "description": "Unix timestamp"
-        },
-        "updated_at": {
-          "type": "integer",
-          "description": "Unix timestamp"
-        },
-        "scheduled_send_at": {
-          "type": "integer",
-          "description": "Unix timestamp (0 = send immediately)"
-        }
-      },
-      "required": [
-        "draft_id",
-        "to",
-        "cc",
-        "bcc",
-        "subject",
-        "body",
-        "created_at",
-        "updated_at",
-        "scheduled_send_at"
-      ]
+        "effect": { "type": "string" },
+        "intent": { "type": "string" },
+        "payload": { "type": "object" },
+        "idempotency_key": { "type": "string" }
+      }
     },
-    "Folder": {
+    "Warning": {
       "type": "object",
+      "required": ["code", "message"],
       "properties": {
-        "folder_id": {
-          "type": "string"
-        },
-        "name": {
-          "type": "string"
-        },
-        "type": {
-          "type": "string",
-          "enum": ["system", "custom"]
-        },
-        "unread_count": {
-          "type": "integer"
-        },
-        "total_count": {
-          "type": "integer"
-        }
-      },
-      "required": ["folder_id", "name", "type", "unread_count", "total_count"]
+        "code": { "type": "string" },
+        "message": { "type": "string" }
+      }
     },
     "Error": {
       "type": "object",
+      "required": ["code", "message"],
       "properties": {
-        "code": {
-          "type": "string",
-          "enum": [
-            "PermissionDenied",
-            "EmailNotFound",
-            "DraftNotFound",
-            "FolderNotFound",
-            "InvalidRecipient",
-            "InvalidInput",
-            "DraftAlreadySent",
-            "TooManyRecipients",
-            "InternalError"
-          ]
-        },
-        "message": {
-          "type": "string",
-          "description": "Human-readable error description"
-        }
-      },
-      "required": ["code", "message"]
-    }
+        "code": { "type": "string" },
+        "message": { "type": "string" },
+        "details": { "type": "object" }
+      }
+    },
+    "MailAccountSummary": { "type": "object" },
+    "MailAccountStatus": { "type": "object" },
+    "Mailbox": { "type": "object" },
+    "Pagination": { "type": "object" },
+    "SortSpec": { "type": "object" },
+    "SearchFilters": { "type": "object" },
+    "EmailPageSnapshot": { "type": "object" },
+    "SearchSnapshot": { "type": "object" },
+    "EmailMessage": { "type": "object" },
+    "DraftDocument": { "type": "object" },
+    "MailRule": { "type": "object" },
+    "ListAccountsInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "properties": { "snapshot": { "type": "array", "items": { "$ref": "#/definitions/MailAccountSummary" } }, "refresh": { "type": "boolean" } } } ] },
+    "GetAccountStatusInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["account_id"], "properties": { "account_id": { "type": "string" }, "snapshot": { "$ref": "#/definitions/MailAccountStatus" }, "refresh": { "type": "boolean" } } } ] },
+    "ListMailboxesInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "properties": { "account_id": { "type": "string" }, "snapshot": { "type": "array", "items": { "$ref": "#/definitions/Mailbox" } }, "include_favorites": { "type": "boolean" }, "refresh": { "type": "boolean" } } } ] },
+    "ReadEmailsInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["mailbox_id"], "properties": { "account_id": { "type": "string" }, "mailbox_id": { "type": "string" }, "pagination": { "$ref": "#/definitions/Pagination" }, "sort": { "$ref": "#/definitions/SortSpec" }, "filters": { "$ref": "#/definitions/SearchFilters" }, "thread_view": { "type": "boolean" }, "focused_inbox": { "type": "boolean" }, "snapshot": { "$ref": "#/definitions/EmailPageSnapshot" }, "refresh": { "type": "boolean" } } } ] },
+    "SearchEmailsInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["query"], "properties": { "query": { "type": "string" }, "pagination": { "$ref": "#/definitions/Pagination" }, "filters": { "$ref": "#/definitions/SearchFilters" }, "snapshot": { "$ref": "#/definitions/SearchSnapshot" }, "refresh": { "type": "boolean" } } } ] },
+    "GetEmailInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["email_id"], "properties": { "email_id": { "type": "string" }, "account_id": { "type": "string" }, "snapshot": { "$ref": "#/definitions/EmailMessage" }, "mark_read": { "type": "boolean" }, "refresh": { "type": "boolean" } } } ] },
+    "GetThreadInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["thread_id"], "properties": { "thread_id": { "type": "string" }, "account_id": { "type": "string" }, "snapshot": { "type": "array", "items": { "$ref": "#/definitions/EmailMessage" } }, "refresh": { "type": "boolean" } } } ] },
+    "MarkReadInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["email_ids", "read"], "properties": { "email_ids": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 250 }, "read": { "type": "boolean" }, "account_id": { "type": "string" }, "mailbox_id": { "type": "string" } } } ] },
+    "FlagEmailInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["email_ids", "flagged"], "properties": { "email_ids": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 250 }, "flagged": { "type": "boolean" }, "account_id": { "type": "string" } } } ] },
+    "DraftEmailInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["draft"], "properties": { "draft": { "$ref": "#/definitions/DraftDocument" }, "autocomplete_recipients": { "type": "boolean" } } } ] },
+    "UpdateDraftInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["draft"], "properties": { "draft": { "$ref": "#/definitions/DraftDocument" } } } ] },
+    "DiscardDraftInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["draft_id"], "properties": { "draft_id": { "type": "string" }, "account_id": { "type": "string" } } } ] },
+    "SendEmailInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["draft_id", "account_id"], "properties": { "draft_id": { "type": "string" }, "account_id": { "type": "string" }, "undo_window_seconds": { "type": "integer", "enum": [0, 5, 10, 30] }, "notify": { "type": "boolean" } } } ] },
+    "ReplyEmailInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["email_id", "account_id"], "properties": { "email_id": { "type": "string" }, "account_id": { "type": "string" }, "body_html": { "type": "string" }, "body_text": { "type": "string" }, "include_original": { "type": "boolean" }, "reply_all": { "type": "boolean" }, "send_now": { "type": "boolean" }, "undo_window_seconds": { "type": "integer", "enum": [0, 5, 10, 30] } } } ] },
+    "ForwardEmailInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["email_id", "account_id", "to"], "properties": { "email_id": { "type": "string" }, "account_id": { "type": "string" }, "to": { "type": "array" }, "cc": { "type": "array" }, "bcc": { "type": "array" }, "note_html": { "type": "string" }, "note_text": { "type": "string" }, "send_now": { "type": "boolean" }, "undo_window_seconds": { "type": "integer", "enum": [0, 5, 10, 30] } } } ] },
+    "MoveEmailInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["email_ids", "destination_mailbox_id"], "properties": { "email_ids": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 250 }, "destination_mailbox_id": { "type": "string" }, "account_id": { "type": "string" } } } ] },
+    "DeleteEmailInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["email_ids"], "properties": { "email_ids": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 250 }, "account_id": { "type": "string" }, "permanent": { "type": "boolean" } } } ] },
+    "ArchiveEmailInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["email_ids"], "properties": { "email_ids": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 250 }, "account_id": { "type": "string" } } } ] },
+    "CreateFolderInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["account_id", "name"], "properties": { "account_id": { "type": "string" }, "name": { "type": "string", "maxLength": 128 }, "parent_mailbox_id": { "type": "string" }, "favorite": { "type": "boolean" } } } ] },
+    "RenameFolderInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["account_id", "mailbox_id", "new_name"], "properties": { "account_id": { "type": "string" }, "mailbox_id": { "type": "string" }, "new_name": { "type": "string", "maxLength": 128 } } } ] },
+    "DeleteFolderInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["account_id", "mailbox_id"], "properties": { "account_id": { "type": "string" }, "mailbox_id": { "type": "string" }, "force": { "type": "boolean" } } } ] },
+    "GetUnreadCountInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "properties": { "account_id": { "type": "string" }, "snapshot": { "type": "array" }, "refresh": { "type": "boolean" } } } ] },
+    "CreateRuleInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["account_id", "rule"], "properties": { "account_id": { "type": "string" }, "rule": { "$ref": "#/definitions/MailRule" } } } ] },
+    "ListRulesInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["account_id"], "properties": { "account_id": { "type": "string" }, "snapshot": { "type": "array" }, "refresh": { "type": "boolean" } } } ] },
+    "DeleteRuleInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["account_id", "rule_id"], "properties": { "account_id": { "type": "string" }, "rule_id": { "type": "string" } } } ] },
+    "ScheduleSendInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["draft_id", "account_id", "scheduled_for"], "properties": { "draft_id": { "type": "string" }, "account_id": { "type": "string" }, "scheduled_for": { "type": "integer" }, "undo_window_seconds": { "type": "integer", "enum": [0, 5, 10, 30] } } } ] },
+    "CancelScheduledSendInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["job_id", "account_id"], "properties": { "job_id": { "type": "string" }, "account_id": { "type": "string" }, "draft_id": { "type": "string" } } } ] }
   }
 }
