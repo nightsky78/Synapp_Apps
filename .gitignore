@@ -4,6 +4,7 @@ Cargo.lock
 
 # Wasm and generated artifacts
 *.wasm
+packages/*.tar.gz
 
 # Environment and local overrides
 .env

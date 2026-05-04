@@ -1,0 +1,63 @@
+{
+  "$schema": "../../../catalog/schemas/package-manifest.schema.json",
+  "schema_version": "1.0.0",
+  "app_id": "dummy-plugin",
+  "name": "Dummy Plugin",
+  "version": "0.1.0",
+  "summary": "Reference Wasm app for validating the Synapp app platform.",
+  "description": "A minimal first-party Synapp app exposing a deterministic add tool through the generic Wasm platform contract.",
+  "publisher": {
+    "id": "synapp",
+    "name": "Synapp"
+  },
+  "runtime": "wasm32-wasip1",
+  "platform_api": "v1",
+  "entrypoint": "target/wasm32-wasip1/release/dummy_plugin.wasm",
+  "capabilities": [
+    {
+      "capability": "compute:local",
+      "label": "Local compute",
+      "description": "Run deterministic CPU-only logic inside the Wasm sandbox.",
+      "required": true,
+      "risk": "low"
+    }
+  ],
+  "tools": [
+    {
+      "name": "add",
+      "description": "Add two signed 32-bit integers.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "a": { "type": "integer" },
+          "b": { "type": "integer" }
+        },
+        "required": ["a", "b"]
+      },
+      "output_schema": {
+        "type": "integer"
+      }
+    }
+  ],
+  "ui": {
+    "contributions": [
+      {
+        "type": "settings_panel",
+        "id": "dummy-plugin.settings",
+        "label": "Dummy Plugin",
+        "schema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean", "default": true }
+          }
+        }
+      }
+    ]
+  },
+  "resource_limits": {
+    "memory_bytes": 16777216,
+    "timeout_ms": 1000
+  }
+}

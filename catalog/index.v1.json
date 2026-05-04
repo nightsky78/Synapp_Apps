@@ -1,0 +1,20 @@
+{
+  "schema_version": "1.0.0",
+  "generated_at": "2026-05-04T00:00:00Z",
+  "apps": [
+    {
+      "app_id": "dummy-plugin",
+      "catalog_entry": "catalog/apps/dummy-plugin.v1.json",
+      "latest_version": "0.1.0",
+      "channel": "stable",
+      "publisher": "Synapp"
+    },
+    {
+      "app_id": "mail-client",
+      "catalog_entry": "catalog/apps/mail-client.v1.json",
+      "latest_version": "1.0.0",
+      "channel": "stable",
+      "publisher": "Synapp"
+    }
+  ]
+}

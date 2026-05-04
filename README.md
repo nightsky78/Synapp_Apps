@@ -1,6 +1,6 @@
 # Synapp Apps
 
-This repository contains applications built for the **Synapp Omni-Channel, AI-Native Application Platform**. Each app exposes its logic via a compiled WebAssembly binary (Execution Interface) and a `plugin.json` manifest (Semantic Interface), making it callable by both human users in a React UI and autonomous AI agents through the Synapp Host Broker.
+This repository is the GitHub-backed curated app catalog for the **Synapp Omni-Channel, AI-Native Application Platform**. Each app exposes its logic via a compiled WebAssembly binary and a `synapp.app.json` manifest, making it callable by both human users in the native UI and autonomous AI agents through generic host contracts.
 
 ## Apps
 
@@ -12,9 +12,12 @@ This repository contains applications built for the **Synapp Omni-Channel, AI-Na
 ## Repository Layout
 
 ```
-apps/          # Wasm application source (Rust)
-docs/          # Platform and app-level documentation
-scripts/       # Build and tooling scripts
+catalog/              # Versioned catalog index, app entries, and JSON schemas
+apps/first-party/     # Synapp-maintained Wasm applications
+apps/community/       # Reviewed community applications
+packages/             # Generated release packages (not committed)
+docs/                 # Publishing and app developer documentation
+scripts/              # Validation, packaging, and build tooling
 ```
 
 ## Building
@@ -22,8 +25,14 @@ scripts/       # Build and tooling scripts
 Individual apps:
 
 ```bash
-cd apps/<AppName>
+cd apps/first-party/<app>
 cargo build --release --target wasm32-wasip1
+```
+
+Validate the catalog before opening a pull request:
+
+```bash
+scripts/validate_catalog.sh
 ```
 
 See each app's documentation for build prerequisites and deployment steps.
@@ -33,6 +42,6 @@ See each app's documentation for build prerequisites and deployment steps.
 All apps in this repository follow the [Synapp Dual-Interface architecture](.github/copilot-instructions.md):
 
 - **Execution Interface:** Stateless `wasm32-wasip1` Wasm binary containing pure business logic.
-- **Semantic Interface:** `plugin.json` manifest describing each function as an AI tool in JSON Schema.
+- **Semantic Interface:** `synapp.app.json` manifest describing each function as an AI tool in JSON Schema.
 - **Zero AI logic in apps:** Apps are dumb executors. The platform handles all AI routing and RAG.
 - **State and network isolation:** No direct TCP/DB connections. All I/O delegated to the host via platform effects.

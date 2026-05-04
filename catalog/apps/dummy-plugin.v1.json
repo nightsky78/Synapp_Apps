@@ -1,0 +1,75 @@
+{
+  "schema_version": "1.0.0",
+  "app_id": "dummy-plugin",
+  "name": "Dummy Plugin",
+  "summary": "Reference Wasm app for validating the Synapp app platform.",
+  "description": "A minimal first-party Synapp app exposing a deterministic add tool through the generic Wasm platform contract.",
+  "version": "0.1.0",
+  "publisher": "Synapp",
+  "category": "developer-tools",
+  "repository_url": "https://github.com/nightsky78/Synapp_Apps/",
+  "package_url": "https://github.com/nightsky78/Synapp_Apps/releases/download/dummy-plugin-v0.1.0/dummy-plugin-0.1.0.tar.gz",
+  "package_sha256": "840a5187753f55bee7664848d7accb6f7216497786110162683a1e295af725dc",
+  "manifest_sha256": "7d611b8eac6e8353c00cc00e7fec30d823785e0275a58c50335d6dbe72d0c40b",
+  "signature": {
+    "type": "metadata-only",
+    "signer": "synapp-dev-catalog",
+    "value": "metadata-only:dummy-plugin:0.1.0",
+    "verification_status": "metadata_verified"
+  },
+  "source": {
+    "repository": "https://github.com/nightsky78/Synapp_Apps/",
+    "directory": "apps/first-party/dummy-plugin",
+    "commit": "19a3512c9110aaad6c0a9f5f7e6c3eb85842864d"
+  },
+  "manifest": {
+    "$schema": "../../../catalog/schemas/package-manifest.schema.json",
+    "schema_version": "1.0.0",
+    "app_id": "dummy-plugin",
+    "name": "Dummy Plugin",
+    "version": "0.1.0",
+    "summary": "Reference Wasm app for validating the Synapp app platform.",
+    "description": "A minimal first-party Synapp app exposing a deterministic add tool through the generic Wasm platform contract.",
+    "publisher": { "id": "synapp", "name": "Synapp" },
+    "runtime": "wasm32-wasip1",
+    "platform_api": "v1",
+    "entrypoint": "target/wasm32-wasip1/release/dummy_plugin.wasm",
+    "capabilities": [
+      {
+        "capability": "compute:local",
+        "label": "Local compute",
+        "description": "Run deterministic CPU-only logic inside the Wasm sandbox.",
+        "required": true,
+        "risk": "low"
+      }
+    ],
+    "tools": [
+      {
+        "name": "add",
+        "description": "Add two signed 32-bit integers.",
+        "input_schema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "a": { "type": "integer" }, "b": { "type": "integer" } },
+          "required": ["a", "b"]
+        },
+        "output_schema": { "type": "integer" }
+      }
+    ],
+    "ui": {
+      "contributions": [
+        {
+          "type": "settings_panel",
+          "id": "dummy-plugin.settings",
+          "label": "Dummy Plugin",
+          "schema": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": { "enabled": { "type": "boolean", "default": true } }
+          }
+        }
+      ]
+    },
+    "resource_limits": { "memory_bytes": 16777216, "timeout_ms": 1000 }
+  }
+}

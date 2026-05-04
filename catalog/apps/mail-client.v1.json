@@ -1,0 +1,155 @@
+{
+  "schema_version": "1.0.0",
+  "app_id": "mail-client",
+  "name": "Mail Client",
+  "summary": "AI-native email client for human and agent workflows.",
+  "description": "First-party Synapp mail client exposing read, draft, send, search, and mailbox organization tools through the generic Wasm platform contract.",
+  "version": "1.0.0",
+  "publisher": "Synapp",
+  "category": "productivity",
+  "repository_url": "https://github.com/nightsky78/Synapp_Apps/",
+  "package_url": "https://github.com/nightsky78/Synapp_Apps/releases/download/mail-client-v1.0.0/mail-client-1.0.0.tar.gz",
+  "package_sha256": "87fc315d8badac3fc5cd18e1250fea053e4150db6bf2deebe1e64b924e174d19",
+  "manifest_sha256": "d3bda7d9c7f9fece8c98d009d612e40b6de3dcfa2e8b4c7815cee6eacfe7eedc",
+  "signature": {
+    "type": "metadata-only",
+    "signer": "synapp-dev-catalog",
+    "value": "metadata-only:mail-client:1.0.0",
+    "verification_status": "metadata_verified"
+  },
+  "source": {
+    "repository": "https://github.com/nightsky78/Synapp_Apps/",
+    "directory": "apps/first-party/mail-client",
+    "commit": "19a3512c9110aaad6c0a9f5f7e6c3eb85842864d"
+  },
+  "manifest": {
+    "$schema": "../../../catalog/schemas/package-manifest.schema.json",
+    "schema_version": "1.0.0",
+    "app_id": "mail-client",
+    "name": "Mail Client",
+    "version": "1.0.0",
+    "summary": "AI-native email client for human and agent workflows.",
+    "description": "First-party Synapp mail client exposing read, draft, send, search, and mailbox organization tools through the generic Wasm platform contract.",
+    "publisher": { "id": "synapp", "name": "Synapp" },
+    "runtime": "wasm32-wasip1",
+    "platform_api": "v1",
+    "entrypoint": "target/wasm32-wasip1/release/mail_client.wasm",
+    "capabilities": [
+      {
+        "capability": "mail:read",
+        "label": "Read mail",
+        "description": "Read message metadata and bodies from user-approved mailboxes.",
+        "required": true,
+        "risk": "high"
+      },
+      {
+        "capability": "mail:draft",
+        "label": "Draft mail",
+        "description": "Create and update draft messages without sending them.",
+        "required": false,
+        "risk": "medium"
+      },
+      {
+        "capability": "mail:send",
+        "label": "Send mail",
+        "description": "Send messages from user-approved accounts.",
+        "required": false,
+        "risk": "critical"
+      },
+      {
+        "capability": "mail:organize",
+        "label": "Organize mail",
+        "description": "Move messages between folders and apply labels.",
+        "required": false,
+        "risk": "medium"
+      }
+    ],
+    "tools": [
+      {
+        "name": "read_emails",
+        "description": "Fetch a paginated list of emails from a mailbox.",
+        "input_schema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "user_id": { "type": "string" },
+            "mailbox": { "type": "string" },
+            "offset": { "type": "integer", "minimum": 0 },
+            "limit": { "type": "integer", "minimum": 1, "maximum": 500 },
+            "permission": { "type": "string", "enum": ["none", "read", "draft", "send"] }
+          },
+          "required": ["user_id", "mailbox", "offset", "limit", "permission"]
+        },
+        "output_schema": { "type": "object" }
+      },
+      {
+        "name": "get_email",
+        "description": "Fetch a single email by identifier.",
+        "input_schema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "user_id": { "type": "string" },
+            "email_id": { "type": "string" },
+            "permission": { "type": "string", "enum": ["none", "read", "draft", "send"] }
+          },
+          "required": ["user_id", "email_id", "permission"]
+        },
+        "output_schema": { "type": "object" }
+      },
+      {
+        "name": "draft_email",
+        "description": "Create a new draft email.",
+        "input_schema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "user_id": { "type": "string" },
+            "to": { "type": "array", "items": { "type": "string", "format": "email" }, "minItems": 1 },
+            "cc": { "type": "array", "items": { "type": "string", "format": "email" } },
+            "bcc": { "type": "array", "items": { "type": "string", "format": "email" } },
+            "subject": { "type": "string", "maxLength": 1000 },
+            "body": { "type": "string" },
+            "permission": { "type": "string", "enum": ["none", "read", "draft", "send"] }
+          },
+          "required": ["user_id", "to", "subject", "body", "permission"]
+        },
+        "output_schema": { "type": "object" }
+      },
+      {
+        "name": "send_email",
+        "description": "Send an existing draft email.",
+        "input_schema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "user_id": { "type": "string" },
+            "draft_id": { "type": "string" },
+            "permission": { "type": "string", "enum": ["none", "read", "draft", "send"] }
+          },
+          "required": ["user_id", "draft_id", "permission"]
+        },
+        "output_schema": { "type": "object" }
+      }
+    ],
+    "ui": {
+      "contributions": [
+        { "type": "navigation_item", "id": "mail-client.nav", "label": "Mail", "target": "app://mail-client/inbox" },
+        {
+          "type": "settings_panel",
+          "id": "mail-client.settings",
+          "label": "Mail Client",
+          "schema": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "default_mailbox": { "type": "string", "default": "INBOX" },
+              "allow_agent_drafts": { "type": "boolean", "default": false }
+            }
+          }
+        }
+      ]
+    },
+    "resource_limits": { "memory_bytes": 67108864, "timeout_ms": 3000 }
+  }
+}

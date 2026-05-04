@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APPS_DIR="$ROOT_DIR/apps"
+APPS_DIR="$ROOT_DIR/apps/first-party"
 TARGET="wasm32-wasip1"
 
 if ! command -v cargo >/dev/null 2>&1; then
@@ -31,7 +31,7 @@ fi
 
 found_any=false
 
-for app_dir in "$APPS_DIR"/*; do
+for app_dir in "$APPS_DIR"/* "$ROOT_DIR/apps/community"/*; do
   [[ -d "$app_dir" ]] || continue
   found_any=true
   app_name="$(basename "$app_dir")"

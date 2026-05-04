@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/nightsky78/Synapp_Apps/catalog/schemas/catalog-index.schema.json",
+  "title": "Synapp Catalog Index",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "generated_at", "apps"],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "apps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["app_id", "catalog_entry", "latest_version", "channel", "publisher"],
+        "properties": {
+          "app_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,62}$" },
+          "catalog_entry": { "type": "string", "pattern": "^catalog/apps/[a-z0-9][a-z0-9-]{1,62}\\.v1\\.json$" },
+          "latest_version": { "type": "string" },
+          "channel": { "enum": ["stable", "beta", "dev"] },
+          "publisher": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

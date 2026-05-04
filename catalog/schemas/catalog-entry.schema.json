@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/nightsky78/Synapp_Apps/catalog/schemas/catalog-entry.schema.json",
+  "title": "Synapp Catalog Entry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "app_id", "name", "summary", "description", "version", "publisher", "category", "repository_url", "package_url", "package_sha256", "manifest_sha256", "signature", "source", "manifest"],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "app_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,62}$" },
+    "name": { "type": "string" },
+    "summary": { "type": "string" },
+    "description": { "type": "string" },
+    "version": { "type": "string" },
+    "publisher": { "type": "string" },
+    "category": { "type": "string" },
+    "repository_url": { "type": "string", "format": "uri" },
+    "package_url": { "type": "string", "format": "uri" },
+    "package_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "manifest_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "signer", "value", "verification_status"],
+      "properties": {
+        "type": { "enum": ["cosign", "minisign", "metadata-only"] },
+        "signer": { "type": "string" },
+        "value": { "type": "string", "minLength": 1 },
+        "verification_status": { "enum": ["verified", "metadata_verified", "unverified"] }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "directory", "commit"],
+      "properties": {
+        "repository": { "type": "string", "format": "uri" },
+        "directory": { "type": "string" },
+        "commit": { "type": "string", "pattern": "^[a-f0-9]{40}$" }
+      }
+    },
+    "manifest": { "$ref": "package-manifest.schema.json" }
+  }
+}

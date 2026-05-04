@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/nightsky78/Synapp_Apps/catalog/schemas/ui-contribution.schema.json",
+  "title": "Synapp UI Contributions",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contributions"],
+  "properties": {
+    "contributions": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          { "$ref": "#/definitions/navigation_item" },
+          { "$ref": "#/definitions/settings_panel" }
+        ]
+      }
+    }
+  },
+  "definitions": {
+    "navigation_item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "id", "label", "target"],
+      "properties": {
+        "type": { "const": "navigation_item" },
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.-]{1,80}$" },
+        "label": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "target": { "type": "string", "pattern": "^app://[a-z0-9-]+/[A-Za-z0-9_./-]*$" }
+      }
+    },
+    "settings_panel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "id", "label", "schema"],
+      "properties": {
+        "type": { "const": "settings_panel" },
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.-]{1,80}$" },
+        "label": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "schema": { "type": "object" }
+      }
+    }
+  }
+}
