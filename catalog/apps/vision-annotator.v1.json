@@ -1,0 +1,77 @@
+{
+  "schema_version": "1.0.0",
+  "app_id": "vision-annotator",
+  "name": "Vision Annotator",
+  "summary": "Image analysis and annotation Wasm app for Synapp.",
+  "description": "Provides image annotation and object detection tools via a Wasm sandbox with configurable confidence thresholds and processing modes.",
+  "version": "0.1.0",
+  "publisher": "Synapp",
+  "category": "productivity",
+  "repository_url": "https://github.com/nightsky78/Synapp_Apps/",
+  "package_url": "https://github.com/nightsky78/Synapp_Apps/releases/download/vision-annotator-v0.1.0/vision-annotator-0.1.0.tar.gz",
+  "package_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "manifest_sha256": "002d7826c1bb7e6bb25bac6041309058372a1293f0d9c530db3abe2f360fbbf3",
+  "signature": {
+    "type": "metadata-only",
+    "signer": "synapp-dev-catalog",
+    "value": "metadata-only:vision-annotator:0.1.0",
+    "verification_status": "metadata_verified"
+  },
+  "source": {
+    "repository": "https://github.com/nightsky78/Synapp_Apps/",
+    "directory": "apps/first-party/vision-annotator",
+    "commit": "0000000000000000000000000000000000000000"
+  },
+  "manifest": {
+    "$schema": "../../../catalog/schemas/package-manifest.schema.json",
+    "schema_version": "1.0.0",
+    "app_id": "vision-annotator",
+    "name": "Vision Annotator",
+    "version": "0.1.0",
+    "summary": "Image analysis and annotation Wasm app for Synapp.",
+    "description": "Provides image annotation and object detection tools via a Wasm sandbox with configurable confidence thresholds and processing modes.",
+    "publisher": { "id": "synapp", "name": "Synapp" },
+    "runtime": "wasm32-wasip1",
+    "platform_api": "v1",
+    "entrypoint": "target/wasm32-wasip1/release/vision_annotator.wasm",
+    "capabilities": [
+      {
+        "capability": "compute:local",
+        "label": "Local compute",
+        "description": "Run image analysis logic inside the Wasm sandbox.",
+        "required": true,
+        "risk": "low"
+      }
+    ],
+    "ui": {
+      "contributions": [
+        {
+          "type": "settings_panel",
+          "id": "vision-annotator.settings",
+          "label": "Vision Annotator",
+          "schema": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "enabled": { "type": "boolean", "default": true },
+              "confidence_threshold": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.8 },
+              "processing_mode": { "type": "string", "enum": ["fast", "balanced", "accurate"], "default": "balanced" }
+            }
+          }
+        }
+      ]
+    },
+    "ui_schemas": {
+      "settings": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": { "type": "boolean", "default": true },
+          "confidence_threshold": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.8 },
+          "processing_mode": { "type": "string", "enum": ["fast", "balanced", "accurate"], "default": "balanced" }
+        }
+      }
+    },
+    "resource_limits": { "memory_bytes": 67108864, "timeout_ms": 5000 }
+  }
+}

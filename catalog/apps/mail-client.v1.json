@@ -10,7 +10,7 @@
   "repository_url": "https://github.com/nightsky78/Synapp_Apps/",
   "package_url": "https://github.com/nightsky78/Synapp_Apps/releases/download/mail-client-v2.1.0/mail-client-2.1.0.tar.gz",
   "package_sha256": "7fd4140e267a6d14b5f7623b0b1998a681f8325b1764391279050c759f67a8b7",
-  "manifest_sha256": "5c31e454d6b60012310e8f3cefafe2e2033c11a7de15e74c785431c3c2e0f94b",
+  "manifest_sha256": "1c056d5165dadd3debde00d439d75df86a484e595a952c5af29639dd1086ed90",
   "signature": {
     "type": "metadata-only",
     "signer": "synapp-dev-catalog",

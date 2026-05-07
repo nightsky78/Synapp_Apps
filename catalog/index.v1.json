@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0.0",
-  "generated_at": "2026-05-04T00:00:00Z",
+  "generated_at": "2026-05-05T00:00:00Z",
   "apps": [
     {
       "app_id": "dummy-plugin",
@@ -13,6 +13,13 @@
       "app_id": "mail-client",
       "catalog_entry": "catalog/apps/mail-client.v1.json",
       "latest_version": "2.1.0",
+      "channel": "stable",
+      "publisher": "Synapp"
+    },
+    {
+      "app_id": "vision-annotator",
+      "catalog_entry": "catalog/apps/vision-annotator.v1.json",
+      "latest_version": "0.1.0",
       "channel": "stable",
       "publisher": "Synapp"
     }
