@@ -31,19 +31,18 @@ function AddressList({ addresses }) {
   );
 }
 
-// Sanitise HTML body — strip scripts/event handlers before rendering
-function SafeHtml({ html }) {
-  const clean = html
-    .replace(/<script[\s\S]*?<\/script>/gi, '')
-    .replace(/\son\w+="[^"]*"/gi, '')
-    .replace(/\son\w+='[^']*'/gi, '');
-  return (
-    <div
-      className="reading-pane__body"
-      // eslint-disable-next-line react/no-danger
-      dangerouslySetInnerHTML={{ __html: clean }}
-    />
-  );
+function htmlToText(html) {
+  return html
+    .replace(/<br\s*\/?\s*>/gi, '\n')
+    .replace(/<\/p\s*>/gi, '\n\n')
+    .replace(/<[^>]*>/g, '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .trim();
 }
 
 export default function ReadingPane() {
@@ -78,7 +77,7 @@ export default function ReadingPane() {
   const handleToggleFlag = useCallback(async () => {
     if (!email) return;
     try {
-      await invoke('flag_email', { email_id: email.email_id, flagged: !email.is_flagged });
+      await invoke('flag_email', { email_ids: [email.email_id], flagged: !email.is_flagged });
       toast(email.is_flagged ? 'Flag removed' : 'Flagged', 'success');
     } catch (err) {
       toast(`Flag failed: ${err.message}`, 'error');
@@ -143,10 +142,9 @@ export default function ReadingPane() {
 
         <div className="reading-pane__divider" />
 
-        {email.body_html
-          ? <SafeHtml html={email.body_html} />
-          : <div className="reading-pane__body" style={{ whiteSpace: 'pre-wrap' }}>{email.body_text}</div>
-        }
+        <div className="reading-pane__body" style={{ whiteSpace: 'pre-wrap' }}>
+          {email.body_text || htmlToText(email.body_html || '')}
+        </div>
 
         {email.attachments?.length > 0 && (
           <div className="reading-pane__attachments">

@@ -31,6 +31,10 @@ const STUB_CONTEXT = {
     'MailStoreRead',
     'MailStoreWrite',
     'MailStoreDelete',
+    'StorePlatformSecret',
+    'ProviderCapabilityRead',
+    'OAuthConnect',
+    'OAuthDisconnect',
   ],
   agent_id: null,
   request_id: null,
@@ -42,13 +46,56 @@ const STUB_ACCOUNTS = [
     display_name: 'Johannes',
     email_address: 'johannes@example.com',
     provider: 'imap',
+    account_label: 'Work Mail',
     enabled: true,
     is_default: true,
     sync_interval_minutes: 5,
     color: '#0078d4',
     connection_state: 'connected',
+    status: 'active',
+    credential_state: 'stored',
+    last_sync_at: Math.floor(Date.now() / 1000) - 300,
+    unread_count: 4,
+    capabilities: ['read', 'draft', 'send', 'organize'],
   },
 ];
+
+const STUB_IDENTITIES = [
+  {
+    identity_id: 'id-1',
+    account_id: 'acc-1',
+    kind: 'primary',
+    display_name: 'Johannes',
+    email_address: 'johannes@example.com',
+    reply_to: '',
+    signature_id: 'sig-1',
+    enabled: true,
+    is_default_for_account: true,
+    is_global_default: true,
+    verification_state: 'allowed',
+  },
+];
+
+const STUB_SIGNATURES = [
+  {
+    signature_id: 'sig-1',
+    account_id: 'acc-1',
+    identity_id: 'id-1',
+    label: 'Default',
+    body_text: 'Best regards,\nJohannes',
+    enabled: true,
+    use_for_new: true,
+    use_for_replies: true,
+    use_for_forwards: false,
+  },
+];
+
+const STUB_PREFERENCES = {
+  reading: { preview_pane: 'right', thread_view: true, focused_inbox: true, page_size: 50, list_density: 'comfortable', remote_content: 'ask' },
+  compose: { undo_send_delay_seconds: 10, default_format: 'html', default_sender_strategy: 'last_used', reply_quote_mode: 'collapsed', forward_attachments_default: false },
+  notifications: { enabled: true, per_account: { 'acc-1': true } },
+  sync_defaults: { interval_minutes: 5, initial_range: '30_days', download_attachments: 'metadata_only', offline_cache: false },
+};
 
 const STUB_MAILBOXES = [
   { mailbox_id: 'inbox', account_id: 'acc-1', name: 'Inbox', kind: 'inbox', unread_count: 3, total_count: 42, favorite: true },
@@ -140,6 +187,23 @@ const STUB_RESPONSES = {
   schedule_send: () => ({ ok: { operation: 'schedule_send', status: 'accepted', data: { job_id: `job-${Date.now()}`, draft_id: '', account_id: '', scheduled_for: 0, undo_window_seconds: 10 }, host_effects: [], warnings: [] } }),
   cancel_scheduled_send: () => ({ ok: { operation: 'cancel_scheduled_send', status: 'accepted', data: { mutation: 'cancel_scheduled_send', resource_ids: [], applied: true }, host_effects: [], warnings: [] } }),
   get_account_status: () => ({ ok: { operation: 'get_account_status', status: 'accepted', data: { account_id: 'acc-1', connection_state: 'connected', last_sync_at: now - 300, unread_count: 4 }, host_effects: [], warnings: [] } }),
+  get_provider_capabilities: () => ({ ok: { operation: 'get_provider_capabilities', status: 'accepted', data: { providers: [{ provider: 'google_oauth', label: 'Google Workspace', status: 'placeholder' }, { provider: 'microsoft_oauth', label: 'Microsoft 365', status: 'placeholder' }], manual_imap_smtp: { enabled: true, security_modes: ['ssl_tls', 'starttls'], default_imap_port: 993, default_smtp_port: 587 }, policy: { allow_receive_only: true, min_sync_interval_minutes: 5, max_recipients: 100 }, oauth_placeholders: ['google_oauth', 'microsoft_oauth'] }, host_effects: [], warnings: [] } }),
+  validate_account_setup: (payload) => ({ ok: { operation: 'validate_account_setup', status: 'accepted', data: { valid: Boolean(payload.account?.email_address), normalized_account: payload.account ? { ...payload.account, incoming: payload.account.incoming ? { ...payload.account.incoming, secret_input_ref: undefined, secret_ref: undefined } : undefined, outgoing: payload.account.outgoing ? { ...payload.account.outgoing, secret_input_ref: undefined, secret_ref: undefined } : undefined, oauth: payload.account.oauth ? { ...payload.account.oauth, connection_ref: undefined, redirect_state_ref: undefined } : undefined } : undefined, field_errors: [], warnings: [], next_required_action: 'test_connection' }, host_effects: [], warnings: [] } }),
+  plan_connection_test: (payload) => ({ ok: { operation: 'plan_connection_test', status: 'accepted', data: { account_id: payload.account?.account_id || 'new-account', test_id: `test-${Date.now()}`, requires_host_execution: true, steps: ['imap_auth', 'imap_mailbox_discovery', 'smtp_auth', 'smtp_send_capability', 'folder_mapping'] }, host_effects: [], warnings: [] } }),
+  complete_account_setup: (payload) => ({ ok: { operation: 'complete_account_setup', status: 'accepted', data: { account: { account_id: payload.account?.account_id || `acc-${Date.now()}`, account_label: payload.account?.account_label, display_name: payload.account?.display_name, email_address: payload.account?.email_address, provider: payload.account?.provider || 'manual_imap_smtp', enabled: payload.save_mode !== 'disabled', is_default: Boolean(payload.make_default), status: payload.save_mode || 'active', connection_state: payload.save_mode === 'receive_only' ? 'receive_only' : 'connected', credential_state: 'stored' }, status: payload.save_mode || 'active', requires_reconnect: false, requires_sync: true }, host_effects: [], warnings: [] } }),
+  begin_oauth_account_setup: (payload) => ({ ok: { operation: 'begin_oauth_account_setup', status: 'accepted', data: { provider: payload.provider, authorization_ref_present: true, status: 'host_action_required', next_route: '/settings/accounts' }, host_effects: [], warnings: [] } }),
+  complete_oauth_account_setup: (payload) => ({ ok: { operation: 'complete_oauth_account_setup', status: 'accepted', data: { account: { account_id: `acc-${Date.now()}`, provider: payload.provider, status: 'active', connection_state: 'connected' }, identity: STUB_IDENTITIES[0], requires_sync: true }, host_effects: [], warnings: [] } }),
+  disconnect_oauth_account: (payload) => ({ ok: { operation: 'disconnect_oauth_account', status: 'accepted', data: { account_id: payload.account_id, credential_state: 'revoked', disabled: Boolean(payload.disable_account) }, host_effects: [], warnings: [] } }),
+  remove_account: (payload) => ({ ok: { operation: 'remove_account', status: 'accepted', data: { account_id: payload.account_id, status: 'removed_pending_cleanup', cleanup_planned: ['local_cache', 'scheduled_sends'] }, host_effects: [], warnings: [] } }),
+  list_identities: () => ({ ok: { operation: 'list_identities', status: 'accepted', data: { identities: STUB_IDENTITIES, signatures: STUB_SIGNATURES, needs_host_refresh: false }, host_effects: [], warnings: [] } }),
+  save_identity: (payload) => ({ ok: { operation: 'save_identity', status: 'accepted', data: { identity: payload.identity, saved: true }, host_effects: [], warnings: [] } }),
+  delete_identity: (payload) => ({ ok: { operation: 'delete_identity', status: 'accepted', data: { identity_id: payload.identity_id, deleted: true }, host_effects: [], warnings: [] } }),
+  save_signature: (payload) => ({ ok: { operation: 'save_signature', status: 'accepted', data: { signature: payload.signature, saved: true }, host_effects: [], warnings: [] } }),
+  delete_signature: (payload) => ({ ok: { operation: 'delete_signature', status: 'accepted', data: { signature_id: payload.signature_id, deleted: true }, host_effects: [], warnings: [] } }),
+  get_user_preferences: () => ({ ok: { operation: 'get_user_preferences', status: 'accepted', data: { preferences: STUB_PREFERENCES, defaults_applied: true }, host_effects: [], warnings: [] } }),
+  save_user_preferences: (payload) => ({ ok: { operation: 'save_user_preferences', status: 'accepted', data: { preferences: payload.preferences, saved: true }, host_effects: [], warnings: [] } }),
+  inspect_legacy_settings: () => ({ ok: { operation: 'inspect_legacy_settings', status: 'accepted', data: { found_legacy_main_schema: true, accounts_requiring_reconnect: 0, migration_warnings: ['Legacy main view settings are now reading preferences.'] }, host_effects: [], warnings: [] } }),
+  migrate_legacy_settings: () => ({ ok: { operation: 'migrate_legacy_settings', status: 'accepted', data: { migrated: true, accounts_requiring_reconnect: [], removed_keys: ['ui_schemas.main'] }, host_effects: [], warnings: [] } }),
 };
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -176,8 +240,16 @@ export async function invoke(operation, payload = {}) {
   throw new Error('Unexpected response format from host bridge');
 }
 
-export const PERMISSION_LEVELS = { none: 0, read: 1, draft: 2, send: 3, organize: 4 };
+export const PERMISSION_MATRIX = {
+  none: ['none'],
+  read: ['none', 'read'],
+  draft: ['none', 'read', 'draft'],
+  send: ['none', 'read', 'draft', 'send'],
+  organize: ['none', 'read', 'organize'],
+  accounts: ['none', 'read', 'accounts'],
+  admin: ['none', 'read', 'draft', 'send', 'organize', 'accounts', 'admin'],
+};
 
 export function hasPermission(userPermission, required) {
-  return (PERMISSION_LEVELS[userPermission] ?? 0) >= (PERMISSION_LEVELS[required] ?? 0);
+  return Boolean(PERMISSION_MATRIX[userPermission]?.includes(required));
 }

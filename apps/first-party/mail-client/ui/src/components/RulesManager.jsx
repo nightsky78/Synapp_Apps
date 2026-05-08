@@ -3,7 +3,7 @@ import { useApp } from '../context/AppContext.jsx';
 import { invoke } from '../bridge.js';
 import { Spinner } from './Spinner.jsx';
 
-export default function RulesManager() {
+export default function RulesManager({ embedded = false }) {
   const { state, dispatch, toast } = useApp();
   const [rules, setRules] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -62,14 +62,8 @@ export default function RulesManager() {
 
   const moveFolders = state.mailboxes.filter(m => m.kind !== 'trash');
 
-  return (
-    <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="Manage rules" onClick={e => e.target === e.currentTarget && close()}>
-      <div className="modal" style={{ width: 520 }}>
-        <div className="modal__header">
-          <span className="modal__title">Inbox Rules</span>
-          <button className="modal__close" onClick={close} aria-label="Close">×</button>
-        </div>
-        <div className="modal__body">
+  const body = (
+    <>
           {/* Existing rules */}
           {loading ? (
             <div style={{ textAlign: 'center', padding: 20 }}><Spinner /></div>
@@ -146,12 +140,30 @@ export default function RulesManager() {
               )}
             </div>
           </div>
+    </>
+  );
+
+  if (embedded) {
+    return (
+      <section className="settings-panel" aria-labelledby="rules-title">
+        <div className="settings-panel__header"><div><h1 id="rules-title">Rules</h1><p>User-scoped automation for moving, flagging, marking, archiving, and deleting mail.</p></div></div>
+        <div className="settings-section settings-section--wide">{body}</div>
+        <div className="settings-actions"><button className="btn btn--primary" onClick={handleCreate} disabled={creating}>{creating ? 'Creating...' : 'Create rule'}</button></div>
+      </section>
+    );
+  }
+
+  return (
+    <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="Manage rules" onClick={e => e.target === e.currentTarget && close()}>
+      <div className="modal" style={{ width: 520 }}>
+        <div className="modal__header">
+          <span className="modal__title">Inbox Rules</span>
+          <button className="modal__close" onClick={close} aria-label="Close">×</button>
         </div>
+        <div className="modal__body">{body}</div>
         <div className="modal__footer">
           <button className="btn btn--secondary" onClick={close}>Close</button>
-          <button className="btn btn--primary" onClick={handleCreate} disabled={creating}>
-            {creating ? 'Creating…' : 'Create Rule'}
-          </button>
+          <button className="btn btn--primary" onClick={handleCreate} disabled={creating}>{creating ? 'Creating...' : 'Create Rule'}</button>
         </div>
       </div>
     </div>

@@ -1,610 +1,392 @@
-# Mail Client App — Function Contracts
+# Mail Client Contracts
 
-> **Purpose:** Explicit contracts for every exported function, including signatures, parameters, return types, error semantics, and permission requirements.
->
-> **Golden Rule:** These contracts are the unbreakable interface. Any deviation in function signature or return type must be reflected immediately in `plugin.json`.
+Stage: 2 - Architect  
+App: `apps/first-party/mail-client`  
+Date: 2026-05-08
 
----
+## 1. ABI And Envelope Contract
 
-## Data Structures (Input/Output Types)
+All exports use the same Wasm ABI:
 
-### Email
-```rust
-{
-  "id": String,                    // Unique email identifier
-  "message_id": String,            // RFC 5322 Message-ID header
-  "user_id": String,               // Owner (always scoped to current user)
-  "from": String,                  // Sender email address
-  "to": Vec<String>,               // Recipients
-  "cc": Vec<String>,               // Carbon copy recipients
-  "bcc": Vec<String>,              // Blind carbon copy recipients
-  "subject": String,               // Email subject
-  "body": String,                  // Email body (HTML or plain text)
-  "received_at": i64,              // Unix timestamp (seconds)
-  "sent_at": i64,                  // Unix timestamp (seconds), 0 if draft
-  "is_read": bool,                 // Read/unread status
-  "folder_id": String,             // Current folder (INBOX, DRAFTS, SENT, etc.)
-  "thread_id": String,             // Thread grouping identifier
-  "has_attachments": bool,         // Whether email has attachments
-  "importance": String             // "low", "normal", or "high"
-}
-```
-
-### Folder
-```rust
-{
-  "folder_id": String,             // Unique identifier (e.g., "inbox", "custom_1")
-  "name": String,                  // Display name (e.g., "Inbox", "Project Alpha")
-  "type": String,                  // "system" or "custom"
-  "unread_count": u32,             // Number of unread emails
-  "total_count": u32               // Total emails in folder
-}
-```
-
-### Draft
-```rust
-{
-  "draft_id": String,              // Unique draft identifier
-  "to": Vec<String>,               // Recipients
-  "cc": Vec<String>,               // Carbon copy
-  "bcc": Vec<String>,              // Blind carbon copy
-  "subject": String,               // Subject line
-  "body": String,                  // Email body
-  "created_at": i64,               // Unix timestamp when draft was created
-  "updated_at": i64,               // Unix timestamp of last modification
-  "scheduled_send_at": i64         // Optional: when to send (0 = send immediately)
-}
-```
-
-### PermissionSet
-```rust
-{
-  "permission_level": String,      // "none", "read", "draft", or "send"
-  "user_id": String,               // The authenticated user
-  "agent_id": String,              // The requesting agent
-  "granted_at": i64,               // Unix timestamp when permission was granted
-  "expires_at": i64                // Unix timestamp when permission expires (0 = never)
-}
-```
-
-### Error Codes
-```rust
-enum MailClientError {
-  PermissionDenied,                // Agent lacks required permission
-  EmailNotFound,                   // Email id does not exist
-  DraftNotFound,                   // Draft id does not exist
-  FolderNotFound,                  // Folder id does not exist
-  InvalidRecipient,                // Email address format invalid
-  InvalidInput,                    // Malformed parameter (e.g., negative offset)
-  DraftAlreadySent,                // Attempt to send a draft twice
-  TooManyRecipients,               // Exceeds platform limit (e.g., >100)
-  InternalError                    // Unexpected platform error
-}
-```
-
----
-
-## Function Contracts
-
-### 1. `read_emails`
-
-**Purpose:** Fetch a paginated list of emails from a specified mailbox.
-
-**Permission Required:** `read`
-
-**Function Signature (Rust):**
 ```rust
 #[no_mangle]
-pub extern "C" fn read_emails(
-    user_id: *const u8,            // UTF-8 JSON string
-    user_id_len: usize,
-    mailbox: *const u8,            // UTF-8 JSON string ("INBOX", "SENT", "DRAFTS", etc.)
-    mailbox_len: usize,
-    offset: u32,                   // Pagination offset (0-indexed)
-    limit: u32,                    // Max results (1-500)
-    permission: *const u8,         // UTF-8 JSON string ("none", "read", "draft", "send")
-    permission_len: usize
-) -> *mut u8                       // JSON-encoded Vec<Email>
+pub extern "C" fn export_name(input_ptr: *const u8, input_len: usize) -> *mut u8
 ```
 
-**Input Parameters:**
-- `user_id`: Authenticated user identifier (provided by host, validated JWT claim)
-- `mailbox`: Folder identifier (e.g., "INBOX", "DRAFTS", custom folder ID)
-- `offset`: Pagination starting index (0 = first email)
-- `limit`: Max emails to return (clamped to 500)
-- `permission`: Current agent permission level
+Input is a UTF-8 JSON object. Output is a null-terminated UTF-8 JSON string released by `free_string(ptr)`. Function names below are the exact Wasm export names and the exact `plugin.json` tool names unless marked as a manifest-only/admin policy item.
 
-**Return Value:**
+Every input includes:
+
+```json
+{
+  "context": {
+    "user_id": "usr_123",
+    "permission": "read|draft|send|organize|accounts|admin|none",
+    "available_effects": ["MailStoreRead"],
+    "agent_id": "optional_agent_id",
+    "request_id": "optional_idempotency_seed"
+  }
+}
+```
+
+Every successful response uses:
+
 ```json
 {
   "ok": {
-    "emails": [
-      { Email object },
-      { Email object }
-    ],
-    "total_count": 1234,            // Total emails in mailbox (for pagination UI)
-    "has_more": true
+    "operation": "export_name",
+    "status": "accepted",
+    "data": {},
+    "host_effects": [],
+    "warnings": []
   }
 }
 ```
-OR
+
+Every error response uses:
+
 ```json
 {
   "err": {
-    "code": "PermissionDenied",
-    "message": "Agent lacks 'read' permission"
+    "code": "InvalidInput",
+    "message": "Human-readable recovery guidance",
+    "details": {}
   }
 }
 ```
 
-**Error Semantics:**
-- `PermissionDenied`: Agent does not have `read` or higher permission
-- `FolderNotFound`: Mailbox does not exist for this user
-- `InvalidInput`: Offset or limit out of bounds (offset >= total_count or limit > 500)
-- `InternalError`: Platform storage unreachable
+## 2. Shared Data Models
 
-**Side Effects:** None (pure query)
+### HostEffect
 
-**Platform Effects Required:** `QueryEmailStore(user_id, mailbox, offset, limit)`
-
-**Notes:**
-- Emails are sorted by `received_at` descending (newest first)
-- Only unread emails are returned if mailbox is a search result (optimized for triage)
-- Large offsets may incur latency; UI should implement cursor-based pagination
-
----
-
-### 2. `get_email`
-
-**Purpose:** Fetch a single email by ID, including full body and metadata.
-
-**Permission Required:** `read`
-
-**Function Signature (Rust):**
-```rust
-#[no_mangle]
-pub extern "C" fn get_email(
-    user_id: *const u8,
-    user_id_len: usize,
-    email_id: *const u8,           // UTF-8 JSON string
-    email_id_len: usize,
-    permission: *const u8,
-    permission_len: usize
-) -> *mut u8                       // JSON-encoded Result<Email, Error>
-```
-
-**Input Parameters:**
-- `user_id`: Authenticated user
-- `email_id`: Unique email identifier
-- `permission`: Agent permission level
-
-**Return Value:**
 ```json
 {
-  "ok": { Email object }
-}
-```
-OR
-```json
-{
-  "err": {
-    "code": "EmailNotFound",
-    "message": "Email id=abc123 does not exist or belongs to different user"
-  }
+  "effect": "MailStoreRead",
+  "intent": "Read a mailbox page snapshot",
+  "payload": {},
+  "idempotency_key": "read_emails:usr_123:req_456"
 }
 ```
 
-**Error Semantics:**
-- `PermissionDenied`: Agent lacks `read` permission
-- `EmailNotFound`: Email does not exist or belongs to different user
-- `InternalError`: Storage error
-
-**Side Effects:** None (pure query)
-
-**Platform Effects Required:** `QueryEmailStore(user_id, email_id)`
-
-**Notes:**
-- Mark email as read in side-effect (host responsibility after successful call)
-- Return full HTML body, not truncated
-
----
-
-### 3. `draft_email`
-
-**Purpose:** Create a new email draft (not sent).
-
-**Permission Required:** `draft`
-
-**Function Signature (Rust):**
-```rust
-#[no_mangle]
-pub extern "C" fn draft_email(
-    user_id: *const u8,
-    user_id_len: usize,
-    to: *const u8,                 // UTF-8 JSON array of strings
-    to_len: usize,
-    cc: *const u8,                 // UTF-8 JSON array of strings (can be empty)
-    cc_len: usize,
-    bcc: *const u8,                // UTF-8 JSON array of strings (can be empty)
-    bcc_len: usize,
-    subject: *const u8,            // UTF-8 JSON string
-    subject_len: usize,
-    body: *const u8,               // UTF-8 JSON string (HTML or plain text)
-    body_len: usize,
-    permission: *const u8,
-    permission_len: usize
-) -> *mut u8                       // JSON-encoded Result<Draft, Error>
-```
-
-**Input Parameters:**
-- `user_id`: Authenticated user
-- `to`: Array of recipient email addresses (at least 1 required)
-- `cc`: Array of CC recipients (optional, can be empty)
-- `bcc`: Array of BCC recipients (optional, can be empty)
-- `subject`: Email subject (can be empty)
-- `body`: Email body (can be empty)
-- `permission`: Agent permission level
-
-**Return Value:**
-```json
-{
-  "ok": {
-    "draft_id": "draft_xyz789",
-    "to": ["recipient@company.com"],
-    "cc": [],
-    "bcc": [],
-    "subject": "Hello",
-    "body": "...",
-    "created_at": 1704067200,
-    "updated_at": 1704067200,
-    "scheduled_send_at": 0
-  }
-}
-```
-OR
-```json
-{
-  "err": {
-    "code": "InvalidRecipient",
-    "message": "Invalid email format: 'not-an-email'"
-  }
-}
-```
-
-**Error Semantics:**
-- `PermissionDenied`: Agent lacks `draft` or higher permission
-- `InvalidRecipient`: Email address format invalid in `to`, `cc`, or `bcc`
-- `InvalidInput`: `to` array is empty
-- `TooManyRecipients`: More than 100 recipients combined (to + cc + bcc)
-- `InternalError`: Draft storage failed
-
-**Side Effects:** Creates ephemeral draft in platform store (auto-expires after 7 days if unsent)
-
-**Platform Effects Required:** `CreateDraft(user_id, to, cc, bcc, subject, body)`
-
-**Notes:**
-- Draft is stored in DRAFTS folder (not visible in INBOX)
-- `draft_id` is valid for 7 days; after expiration, `send_email()` will fail with `DraftNotFound`
-- Multiple versions of a draft can coexist if caller loses the `draft_id`; platform should garbage-collect
-
----
-
-### 4. `send_email`
-
-**Purpose:** Send a draft email to recipients. Transitions draft from DRAFTS to SENT folder.
-
-**Permission Required:** `send`
-
-**Function Signature (Rust):**
-```rust
-#[no_mangle]
-pub extern "C" fn send_email(
-    user_id: *const u8,
-    user_id_len: usize,
-    draft_id: *const u8,           // UTF-8 JSON string
-    draft_id_len: usize,
-    permission: *const u8,
-    permission_len: usize
-) -> *mut u8                       // JSON-encoded Result<EmailId, Error>
-```
-
-**Input Parameters:**
-- `user_id`: Authenticated user (must own the draft)
-- `draft_id`: Identifier from `draft_email()`
-- `permission`: Agent permission level
-
-**Return Value:**
-```json
-{
-  "ok": {
-    "email_id": "email_abc123",
-    "sent_at": 1704067260
-  }
-}
-```
-OR
-```json
-{
-  "err": {
-    "code": "DraftNotFound",
-    "message": "Draft draft_xyz789 not found or has expired"
-  }
-}
-```
-
-**Error Semantics:**
-- `PermissionDenied`: Agent lacks `send` permission
-- `DraftNotFound`: Draft does not exist, has expired, or belongs to different user
-- `DraftAlreadySent`: Draft was already sent (idempotency check)
-- `InvalidRecipient`: Recipient list is now invalid (user deleted all recipients between draft and send)
-- `InternalError`: SMTP service unreachable or other platform error
-
-**Side Effects:** 
-- Sends email via platform mail service
-- Moves draft to SENT folder with updated `sent_at` timestamp
-- Commits email record to database
-
-**Platform Effects Required:** 
-- `SendEmail(draft_id, to, cc, bcc, subject, body)`
-- `CommitEmail(email_id, user_id, sent_at)`
-
-**Notes:**
-- Idempotent: Calling `send_email()` twice with same draft_id should succeed once, fail with `DraftAlreadySent` on second attempt
-- No retry logic in Wasm; host handles retries
-- Recipient validation is re-checked before sending (may reject if addresses are now invalid)
-
----
-
-### 5. `list_folders`
-
-**Purpose:** Enumerate all folders for the user.
-
-**Permission Required:** `read` (minimum)
-
-**Function Signature (Rust):**
-```rust
-#[no_mangle]
-pub extern "C" fn list_folders(
-    user_id: *const u8,
-    user_id_len: usize,
-    permission: *const u8,
-    permission_len: usize
-) -> *mut u8                       // JSON-encoded Result<Vec<Folder>, Error>
-```
-
-**Input Parameters:**
-- `user_id`: Authenticated user
-- `permission`: Agent permission level
-
-**Return Value:**
-```json
-{
-  "ok": {
-    "folders": [
-      {
-        "folder_id": "inbox",
-        "name": "Inbox",
-        "type": "system",
-        "unread_count": 42,
-        "total_count": 1234
-      },
-      {
-        "folder_id": "sent",
-        "name": "Sent",
-        "type": "system",
-        "unread_count": 0,
-        "total_count": 567
-      },
-      {
-        "folder_id": "custom_1",
-        "name": "Project Alpha",
-        "type": "custom",
-        "unread_count": 5,
-        "total_count": 89
-      }
-    ]
-  }
-}
-```
-
-**Error Semantics:**
-- `PermissionDenied`: Agent lacks `read` permission
-- `InternalError`: Folder enumeration failed
-
-**Side Effects:** None (pure query)
-
-**Platform Effects Required:** `QueryFolderList(user_id)`
-
-**Notes:**
-- System folders (INBOX, SENT, DRAFTS, TRASH, JUNK, ARCHIVE) are always present
-- Unread count includes only direct emails, not threaded replies
-- Folder order: system folders first, then custom folders alphabetically
-
----
-
-### 6. `move_email`
-
-**Purpose:** Move an email from one folder to another.
-
-**Permission Required:** `draft` (for moving to/from DRAFTS) or `send` (for all other moves)
-
-**Function Signature (Rust):**
-```rust
-#[no_mangle]
-pub extern "C" fn move_email(
-    user_id: *const u8,
-    user_id_len: usize,
-    email_id: *const u8,
-    email_id_len: usize,
-    target_folder_id: *const u8,  // UTF-8 JSON string (e.g., "trash", "custom_1")
-    target_folder_id_len: usize,
-    permission: *const u8,
-    permission_len: usize
-) -> *mut u8                       // JSON-encoded Result<(), Error>
-```
-
-**Input Parameters:**
-- `user_id`: Authenticated user
-- `email_id`: Email to move
-- `target_folder_id`: Destination folder
-- `permission`: Agent permission level
-
-**Return Value:**
-```json
-{
-  "ok": null
-}
-```
-OR
-```json
-{
-  "err": {
-    "code": "FolderNotFound",
-    "message": "Target folder custom_1 does not exist"
-  }
-}
-```
-
-**Error Semantics:**
-- `PermissionDenied`: Agent lacks required permission for target folder
-- `EmailNotFound`: Email does not exist or belongs to different user
-- `FolderNotFound`: Target folder does not exist or belongs to different user
-- `InternalError`: Move operation failed
-
-**Side Effects:** Email record updated with new `folder_id`
-
-**Platform Effects Required:** `UpdateEmail(email_id, { folder_id: target_folder_id })`
-
-**Notes:**
-- Moving to TRASH soft-deletes email (kept for 30 days, then auto-purged)
-- Moving from DRAFTS to SENT requires the email to have `sent_at` set (only sent drafts can move to SENT)
-- Recursive folder moves (e.g., moving INBOX itself) are not supported
-
----
-
-### 7. `search_emails`
-
-**Purpose:** Full-text search across emails matching query string.
-
-**Permission Required:** `read`
-
-**Function Signature (Rust):**
-```rust
-#[no_mangle]
-pub extern "C" fn search_emails(
-    user_id: *const u8,
-    user_id_len: usize,
-    query: *const u8,              // UTF-8 JSON string (search expression)
-    query_len: usize,
-    limit: u32,                    // Max results (1-500)
-    permission: *const u8,
-    permission_len: usize
-) -> *mut u8                       // JSON-encoded Result<Vec<Email>, Error>
-```
-
-**Input Parameters:**
-- `user_id`: Authenticated user
-- `query`: Search expression (free-form text or operators like `from:alice@company.com`, `subject:"urgent"`, `before:2024-01-01`)
-- `limit`: Max results to return (clamped to 500)
-- `permission`: Agent permission level
-
-**Return Value:**
-```json
-{
-  "ok": {
-    "emails": [
-      { Email object },
-      { Email object }
-    ],
-    "matched_count": 1234,         // Total matches (may exceed limit)
-    "has_more": true
-  }
-}
-```
-
-**Error Semantics:**
-- `PermissionDenied`: Agent lacks `read` permission
-- `InvalidInput`: Query syntax invalid or limit out of bounds
-- `InternalError`: Search index unreachable
-
-**Side Effects:** None (pure query)
-
-**Platform Effects Required:** `SearchEmailIndex(user_id, query, limit)`
-
-**Notes:**
-- Search is scoped to authenticated user automatically
-- Operators: `from:`, `to:`, `subject:`, `before:`, `after:`, `is:unread`, `is:read`, `has:attachment`
-- Free-form text searches across subject and body (case-insensitive)
-- Results sorted by relevance (platform responsibility)
-- Large queries may timeout; platform should enforce reasonable timeout (5-10s)
-
----
-
-### 8. `get_agent_permissions`
-
-**Purpose:** Query the current agent's permission level.
-
-**Permission Required:** None (always callable)
-
-**Function Signature (Rust):**
-```rust
-#[no_mangle]
-pub extern "C" fn get_agent_permissions(
-    user_id: *const u8,
-    user_id_len: usize,
-    permission: *const u8,
-    permission_len: usize
-) -> *mut u8                       // JSON-encoded PermissionSet
-```
-
-**Input Parameters:**
-- `user_id`: Authenticated user
-- `permission`: Current agent permission (passed by host)
-
-**Return Value:**
-```json
-{
-  "permission_level": "send",
-  "user_id": "user_abc123",
-  "agent_id": "agent_xyz789",
-  "granted_at": 1704000000,
-  "expires_at": 0
-}
-```
-
-**Error Semantics:** None (always succeeds)
-
-**Side Effects:** None (pure query)
-
-**Platform Effects Required:** None
-
-**Notes:**
-- Utility function for agents to introspect their own capabilities
-- Useful for conditional behavior: "if permission == 'send' then send_email() else draft_email()"
-- No platform round-trip required; permission is already provided to the function
-- Always returns exactly one PermissionSet (for the current user-agent pair)
-
----
-
-## Summary: Signature Quick Reference
-
-| Function | Permission | Input | Output | Key Effect |
-|----------|-----------|-------|--------|------------|
-| `read_emails` | read | user_id, mailbox, offset, limit | Vec<Email> | Query |
-| `get_email` | read | user_id, email_id | Email | Query + mark read |
-| `draft_email` | draft | user_id, to, cc, bcc, subject, body | Draft | Create draft |
-| `send_email` | send | user_id, draft_id | EmailId | Send + move to SENT |
-| `list_folders` | read | user_id | Vec<Folder> | Query |
-| `move_email` | draft/send | user_id, email_id, target_folder_id | () | Update folder |
-| `search_emails` | read | user_id, query, limit | Vec<Email> | Query |
-| `get_agent_permissions` | none | user_id, permission | PermissionSet | Introspect |
-
----
-
-## Error Handling Philosophy
-
-- **Permission errors** are always returned as `PermissionDenied`, never silently ignored
-- **Not-found errors** are explicit (`EmailNotFound`, `DraftNotFound`, etc.), enabling agent retry logic
-- **Validation errors** are descriptive (`InvalidRecipient`, `InvalidInput`) with message hints
-- **Internal errors** are rare but possible (`InternalError`); platform should log and alert
-- **All errors include a message field** for debugging and user feedback
+### MailAccountSummary
+
+Fields: `account_id`, `account_label`, `display_name`, `email_address`, `provider`, `enabled`, `is_default`, `status`, `connection_state`, `last_sync_at`, `unread_count`, `color`, `capabilities`.
+
+Secrets are represented only as `credential_state`, `incoming_secret_ref`, `outgoing_secret_ref`, or `oauth_connection_ref`. Raw secret values are forbidden.
+
+### UserMailAccountSetup
+
+Fields:
+
+- `account_id` optional for create, required for update.
+- `revision` optional optimistic concurrency token.
+- `account_label`, `display_name`, `email_address`, optional `reply_to`.
+- `provider`: `manual_imap_smtp`, `google_oauth`, `microsoft_oauth`, or host provider id.
+- `auth_method`: `password`, `app_password`, `oauth2`, `host_connector`.
+- `incoming`: `{ "protocol": "imap", "host", "port", "security", "username", "auth_method", "secret_input_ref", "secret_ref", "path_prefix" }`.
+- `outgoing`: `{ "protocol": "smtp", "host", "port", "security", "username", "auth_method", "use_incoming_secret", "secret_input_ref", "secret_ref" }`.
+- `oauth`: `{ "provider", "connection_ref", "redirect_state_ref", "scopes" }`.
+- `sync`: `{ "interval_minutes", "initial_range", "download_attachments", "offline_cache" }`.
+- `folder_mapping`: `{ "inbox", "sent", "drafts", "trash", "archive", "junk" }`.
+- `desired_status`: `active`, `disabled`, `incomplete`, or `receive_only`.
+
+### ConnectionTestPlan And Result
+
+`ConnectionTestPlan.data` includes `account_id`, `test_id`, `steps`, and `requires_host_execution: true`.
+
+Step names: `imap_auth`, `imap_mailbox_discovery`, `smtp_auth`, `smtp_send_capability`, `folder_mapping`.
+
+Host returns sanitized `ConnectionTestResult` with per-step `state`: `not_tested`, `testing`, `passed`, `warning`, `failed`, plus `code`, `message`, and `field_paths`. No credentials or tokens are returned.
+
+### UserMailPreferences
+
+Fields:
+
+- `reading`: `preview_pane` (`right`, `bottom`, `off`), `thread_view`, `focused_inbox`, `page_size`, `list_density`, optional `remote_content`.
+- `compose`: `undo_send_delay_seconds` (`0`, `5`, `10`, `30`), `default_format`, `default_sender_strategy`, `reply_quote_mode`, `forward_attachments_default`.
+- `notifications`: `enabled`, `per_account`, optional `quiet_hours`.
+- `sync_defaults`: `interval_minutes`, `initial_range`, `download_attachments`, `offline_cache`.
+
+### MailIdentity And Signature
+
+`MailIdentity`: `identity_id`, `account_id`, `kind`, `display_name`, `email_address`, optional `reply_to`, `signature_id`, `enabled`, `is_default_for_account`, `is_global_default`, `verification_state`.
+
+`MailSignature`: `signature_id`, `account_id`, optional `identity_id`, `label`, `body_html`, `body_text`, `enabled`, `use_for_new`, `use_for_replies`, `use_for_forwards`.
+
+### Mail Message, Draft, Rule, And Folder
+
+Existing models remain in force:
+
+- `Mailbox`: `mailbox_id`, optional `account_id`, `name`, `kind`, `unread_count`, `total_count`, optional `parent_id`, `favorite`, optional `sync_state`.
+- `EmailAddress`: `email`, optional `display_name`.
+- `EmailMessage`: `email_id`, `account_id`, `mailbox_id`, optional `thread_id`, `from`, `to`, `cc`, `bcc`, `subject`, `preview`, `body_html`, `body_text`, timestamps, `is_read`, `is_flagged`, `has_attachments`, `importance`, categories, attachments.
+- `DraftDocument`: optional `draft_id`, `account_id`, `to`, `cc`, `bcc`, `subject`, body, attachment references, optional `signature`, optional `importance`, read receipt flag, optional `scheduled_send_at`.
+- `MailRule`: `rule_id`, `name`, `enabled`, `stop_processing`, `priority`, `conditions`, `actions`.
+
+## 3. Common Validation And Errors
+
+Common errors: `InvalidInput`, `PermissionDenied`, `EffectUnavailable`, `PolicyDenied`, `AccountNotFound`, `AccountIncomplete`, `CredentialRequired`, `ConnectionTestRequired`, `ConnectionTestFailed`, `IdentityNotFound`, `MailboxNotFound`, `EmailNotFound`, `ThreadNotFound`, `DraftNotFound`, `RuleNotFound`, `ScheduledJobNotFound`, `Conflict`, `TooManyRecipients`, `HostRejected`, `InternalError`.
+
+Validation constants:
+
+- Message id batches: 1 to 250 ids.
+- Page size: default 50, max 100.
+- Recipients: max 100.
+- Subject: max 998 characters.
+- Body: combined HTML/text max 512,000 bytes.
+- Folder name: max 128 characters.
+- Rule name: max 120 characters.
+- Undo send: `0`, `5`, `10`, or `30` seconds.
+- IMAP defaults: port 993, `ssl_tls`.
+- SMTP defaults: port 587, `starttls`; port 465 with `ssl_tls` allowed.
+- `security: none` is invalid unless admin policy explicitly allows it.
+
+## 4. Account Setup And Preference Exports
+
+These exports are required to implement the UX gap. Permission should be represented by a user-scoped capability such as `mail:accounts`; the exact permission string may be `accounts` in Wasm context or mapped by the broker.
+
+### `get_provider_capabilities`
+
+Purpose: Read host/admin policy for manual IMAP/SMTP, OAuth providers, security modes, test capabilities, sync bounds, max recipients, and attachment limits.
+
+Input: `context`, optional `provider_ids: string[]`.
+
+Return data: `{ "providers": [], "manual_imap_smtp": {}, "policy": {}, "oauth_placeholders": [] }`.
+
+Host effects: `ProviderCapabilityRead`, `MailStoreRead`.
+
+Errors: `PermissionDenied`, `EffectUnavailable`, `PolicyDenied`, `InvalidInput`.
+
+### `validate_account_setup`
+
+Purpose: Validate a create/update account setup draft before testing or saving.
+
+Input: `context`, `account: UserMailAccountSetup`, optional `admin_policy_snapshot`, optional `existing_account_snapshot`.
+
+Return data: `{ "valid": boolean, "normalized_account": UserMailAccountSetup, "field_errors": [], "warnings": [], "next_required_action": "enter_secret|connect_oauth|test_connection|save_disabled|complete" }`.
+
+Host effects: none when policy snapshot is supplied; otherwise `ProviderCapabilityRead`.
+
+Errors: `InvalidInput`, `PolicyDenied`, `CredentialRequired`, `Conflict`, `EffectUnavailable`.
+
+### `plan_connection_test`
+
+Purpose: Plan host-owned incoming/outgoing/folder test steps.
+
+Input: `context`, `account: UserMailAccountSetup`, `test_scope: "all|incoming|outgoing|folder_mapping"`, optional `admin_policy_snapshot`.
+
+Return data: `ConnectionTestPlan`.
+
+Host effects: `ProviderCapabilityRead`, `AccountCredentialRead`, `ImapSync`, `ImapFetch`, `SmtpSend`.
+
+Errors: `InvalidInput`, `PolicyDenied`, `CredentialRequired`, `EffectUnavailable`, `AccountIncomplete`.
+
+### `complete_account_setup`
+
+Purpose: Save or update a user account after validation and optional connection tests.
+
+Input: `context`, `account: UserMailAccountSetup`, optional `connection_test_result`, optional `make_default: boolean`, optional `save_mode: "active|receive_only|disabled|incomplete"`.
+
+Return data: `{ "account": MailAccountSummary, "status", "requires_reconnect": boolean, "requires_sync": boolean }`.
+
+Host effects: `AccountCredentialWrite`, `StorePlatformSecret`, `MailStoreWrite`, optional `ImapSync`.
+
+Errors: `InvalidInput`, `PolicyDenied`, `CredentialRequired`, `ConnectionTestRequired`, `ConnectionTestFailed`, `Conflict`, `EffectUnavailable`.
+
+### `begin_oauth_account_setup`
+
+Purpose: Plan a host-owned OAuth authorization start for a supported provider.
+
+Input: `context`, `provider`, `email_address`, optional `account_label`, optional `requested_scopes`, optional `redirect_route`.
+
+Return data: `{ "provider", "authorization_ref", "status": "host_action_required", "next_route" }`.
+
+Host effects: `ProviderCapabilityRead`, `OAuthConnect`.
+
+Errors: `InvalidInput`, `PolicyDenied`, `EffectUnavailable`.
+
+### `complete_oauth_account_setup`
+
+Purpose: Convert a host-completed OAuth connection into a user mail account setup plan.
+
+Input: `context`, `provider`, `authorization_ref`, `oauth_connection_ref`, optional `account: UserMailAccountSetup`, optional `connection_test_result`.
+
+Return data: `{ "account": MailAccountSummary, "identity": MailIdentity, "requires_sync": boolean }`.
+
+Host effects: `OAuthConnect`, `AccountCredentialWrite`, `MailStoreWrite`, optional `ImapSync`.
+
+Errors: `InvalidInput`, `PolicyDenied`, `CredentialRequired`, `ConnectionTestRequired`, `ConnectionTestFailed`, `EffectUnavailable`.
+
+### `disconnect_oauth_account`
+
+Purpose: Plan OAuth disconnect without removing local account metadata unless requested.
+
+Input: `context`, `account_id`, optional `oauth_connection_ref`, `disable_account: boolean`.
+
+Return data: `{ "account_id", "credential_state": "revoked", "disabled": boolean }`.
+
+Host effects: `OAuthDisconnect`, `AccountCredentialWrite`, `MailStoreWrite`.
+
+Errors: `AccountNotFound`, `PermissionDenied`, `EffectUnavailable`, `PolicyDenied`.
+
+### `remove_account`
+
+Purpose: Remove or disable a user account and plan cleanup of local cache and scheduled sends.
+
+Input: `context`, `account_id`, `remove_local_cache: boolean`, `cancel_scheduled_sends: boolean`, optional `delete_drafts: boolean`, optional `revision`.
+
+Return data: `{ "account_id", "status": "removed_pending_cleanup|disabled", "cleanup_planned": [] }`.
+
+Host effects: `AccountCredentialWrite`, `MailStoreWrite`, `MailStoreDelete`, `CancelJob`, optional `OAuthDisconnect`.
+
+Errors: `AccountNotFound`, `Conflict`, `EffectUnavailable`, `PolicyDenied`.
+
+### `list_identities`
+
+Purpose: Read sender identities, aliases, and signatures for account settings and compose From selector.
+
+Input: `context`, optional `account_id`, optional `snapshot`.
+
+Return data: `{ "identities": MailIdentity[], "signatures": MailSignature[], "needs_host_refresh": boolean }`.
+
+Host effects: `AccountCredentialRead`, `MailStoreRead`.
+
+Errors: `PermissionDenied`, `AccountNotFound`, `EffectUnavailable`.
+
+### `save_identity`
+
+Purpose: Create or update an alias/send-as identity.
+
+Input: `context`, `identity: MailIdentity`, optional `revision`.
+
+Return data: `{ "identity": MailIdentity, "verification_required": boolean }`.
+
+Host effects: `AccountCredentialWrite`, `MailStoreWrite`.
+
+Errors: `InvalidInput`, `AccountNotFound`, `PolicyDenied`, `Conflict`, `IdentityNotFound`, `EffectUnavailable`.
+
+### `delete_identity`
+
+Purpose: Disable or remove an alias/send-as identity.
+
+Input: `context`, `identity_id`, optional `account_id`, optional `force: boolean`.
+
+Return data: `{ "identity_id", "removed": boolean, "default_reassigned_to": string|null }`.
+
+Host effects: `AccountCredentialWrite`, `MailStoreWrite`.
+
+Errors: `IdentityNotFound`, `PolicyDenied`, `Conflict`, `InvalidInput`, `EffectUnavailable`.
+
+### `save_signature`
+
+Purpose: Create or update a signature.
+
+Input: `context`, `signature: MailSignature`, optional `revision`.
+
+Return data: `{ "signature": MailSignature }`.
+
+Host effects: `MailStoreWrite`.
+
+Errors: `InvalidInput`, `AccountNotFound`, `IdentityNotFound`, `PolicyDenied`, `Conflict`, `EffectUnavailable`.
+
+### `delete_signature`
+
+Purpose: Remove a signature and clear identity defaults that reference it.
+
+Input: `context`, `signature_id`, optional `account_id`, optional `force: boolean`.
+
+Return data: `{ "signature_id", "removed": boolean, "identity_updates": [] }`.
+
+Host effects: `MailStoreWrite`, `MailStoreDelete`.
+
+Errors: `IdentityNotFound`, `InvalidInput`, `Conflict`, `EffectUnavailable`.
+
+### `get_user_preferences`
+
+Purpose: Read user mail preferences, optionally with defaults.
+
+Input: `context`, optional `snapshot`, optional `include_defaults: boolean`.
+
+Return data: `{ "preferences": UserMailPreferences, "defaults_applied": boolean, "needs_host_refresh": boolean }`.
+
+Host effects: `MailStoreRead`.
+
+Errors: `PermissionDenied`, `EffectUnavailable`.
+
+### `save_user_preferences`
+
+Purpose: Validate and save user mail preferences.
+
+Input: `context`, `preferences: UserMailPreferences`, optional `revision`.
+
+Return data: `{ "preferences": UserMailPreferences, "changed_groups": [] }`.
+
+Host effects: `MailStoreWrite`.
+
+Errors: `InvalidInput`, `PolicyDenied`, `Conflict`, `EffectUnavailable`.
+
+### `inspect_legacy_settings`
+
+Purpose: Classify old `ui_schemas.main`, `settings.accounts`, and `settings.general` data for safe migration.
+
+Input: `context`, `legacy_settings`.
+
+Return data: `{ "accounts_detected": number, "preferences_detected": [], "credential_risks": [], "migration_preview": {}, "requires_user_reconnect": [] }`.
+
+Host effects: none if legacy data is supplied; otherwise `MailStoreRead`.
+
+Errors: `InvalidInput`, `PermissionDenied`, `EffectUnavailable`.
+
+### `migrate_legacy_settings`
+
+Purpose: Write user-scoped account/preference records from old settings and remove obsolete settings keys.
+
+Input: `context`, `legacy_settings`, optional `migration_options`, optional `dry_run: boolean`.
+
+Return data: `{ "migrated_accounts": [], "migrated_preferences": {}, "migration_map": {}, "requires_reconnect": [], "obsolete_keys_removed": [] }`.
+
+Host effects: `MailStoreRead`, `MailStoreWrite`, `MailStoreDelete`, optional `AccountCredentialWrite`.
+
+Errors: `InvalidInput`, `Conflict`, `PermissionDenied`, `EffectUnavailable`, `PolicyDenied`.
+
+## 5. Existing Mail Workflow Exports
+
+These existing exports should be preserved. Where implementation details are currently broad in `plugin.json`, schemas must be tightened to the models above.
+
+| Export | Permission | Parameters | Return Data | Host Effects | Errors |
+| --- | --- | --- | --- | --- | --- |
+| `list_accounts` | `mail:read` | `context`, optional `snapshot: MailAccountSummary[]`, `refresh: boolean` | `QueryCollection<MailAccountSummary>` | `AccountCredentialRead` | `PermissionDenied`, `EffectUnavailable`, `InvalidInput` |
+| `get_account_status` | `mail:read` | `context`, `account_id`, optional `snapshot: MailAccountStatus`, `refresh` | `MailAccountStatus` with `needs_host_refresh` | `AccountCredentialRead`, `ImapSync` | `AccountNotFound`, `PermissionDenied`, `EffectUnavailable` |
+| `list_mailboxes` | `mail:read` | `context`, optional `account_id`, optional `snapshot: Mailbox[]`, `include_favorites`, `refresh` | `QueryCollection<Mailbox>` | `AccountCredentialRead`, `ImapFetch` | `AccountNotFound`, `PermissionDenied`, `EffectUnavailable` |
+| `read_emails` | `mail:read` | `context`, optional `account_id`, `mailbox_id`, optional `pagination`, `sort`, `filters`, `thread_view`, `focused_inbox`, `snapshot`, `refresh` | `ReadEmailsData` | `AccountCredentialRead`, `ImapFetch` | `MailboxNotFound`, `InvalidInput`, `PermissionDenied`, `EffectUnavailable` |
+| `search_emails` | `mail:read` | `context`, `query`, optional `pagination`, `filters`, `snapshot`, `refresh` | `SearchEmailsData` | `AccountCredentialRead`, `ImapFetch` | `InvalidInput`, `PermissionDenied`, `EffectUnavailable` |
+| `get_email` | `mail:read` | `context`, `email_id`, optional `account_id`, optional `snapshot`, `mark_read`, `refresh` | `EmailMessage` plus mark-read plan when requested | `AccountCredentialRead`, `ImapFetch`, optional `MailStoreWrite` | `EmailNotFound`, `PermissionDenied`, `EffectUnavailable` |
+| `get_thread` | `mail:read` | `context`, `thread_id`, optional `account_id`, optional `snapshot`, `refresh` | `ThreadData` | `AccountCredentialRead`, `ImapFetch` | `ThreadNotFound`, `PermissionDenied`, `EffectUnavailable` |
+| `mark_read` | `mail:read` | `context`, `email_ids`, `read`, optional `account_id`, `mailbox_id` | `MutationAck` | `MailStoreWrite` | `InvalidInput`, `EmailNotFound`, `PermissionDenied`, `EffectUnavailable` |
+| `flag_email` | `mail:organize` | `context`, `email_ids`, `flagged`, optional `account_id` | `MutationAck` | `MailStoreWrite` | `InvalidInput`, `EmailNotFound`, `PermissionDenied`, `EffectUnavailable` |
+| `draft_email` | `mail:draft` | `context`, `draft: DraftDocument`, `autocomplete_recipients` | `DraftMutationData` | `MailStoreWrite`, optional `ContactLookup` | `InvalidInput`, `TooManyRecipients`, `AccountIncomplete`, `IdentityNotFound`, `PermissionDenied`, `EffectUnavailable` |
+| `update_draft` | `mail:draft` | `context`, `draft: DraftDocument` | `DraftMutationData` | `MailStoreWrite` | `DraftNotFound`, `Conflict`, `InvalidInput`, `PermissionDenied`, `EffectUnavailable` |
+| `discard_draft` | `mail:draft` | `context`, `draft_id`, optional `account_id` | `MutationAck` | `MailStoreDelete` | `DraftNotFound`, `PermissionDenied`, `EffectUnavailable` |
+| `send_email` | `mail:send` | `context`, `draft_id`, `account_id`, optional `undo_window_seconds`, `notify` | `SendPlan` | `MailStoreWrite`, `SmtpSend`, optional `NotifyUser` | `DraftNotFound`, `AccountIncomplete`, `CredentialRequired`, `InvalidInput`, `PermissionDenied`, `EffectUnavailable` |
+| `reply_email` | `mail:send` | `context`, `email_id`, `account_id`, optional `body_html`, `body_text`, `include_original`, `reply_all`, `send_now`, `undo_window_seconds` | `ReplyPlan` | `MailStoreRead`, `MailStoreWrite`, `SmtpSend` | `EmailNotFound`, `AccountIncomplete`, `InvalidInput`, `PermissionDenied`, `EffectUnavailable` |
+| `forward_email` | `mail:send` | `context`, `email_id`, `account_id`, `to`, optional `cc`, `bcc`, `note_html`, `note_text`, `send_now`, `undo_window_seconds` | `ForwardPlan` | `MailStoreRead`, `MailStoreWrite`, `SmtpSend` | `EmailNotFound`, `TooManyRecipients`, `InvalidInput`, `PermissionDenied`, `EffectUnavailable` |
+| `move_email` | `mail:organize` | `context`, `email_ids`, `destination_mailbox_id`, optional `account_id` | `MutationAck` | `MailStoreWrite` | `MailboxNotFound`, `EmailNotFound`, `InvalidInput`, `PermissionDenied`, `EffectUnavailable` |
+| `delete_email` | `mail:organize` | `context`, `email_ids`, optional `account_id`, `permanent` | `MutationAck` | `MailStoreWrite`, `MailStoreDelete` | `PolicyDenied`, `EmailNotFound`, `InvalidInput`, `PermissionDenied`, `EffectUnavailable` |
+| `archive_email` | `mail:organize` | `context`, `email_ids`, optional `account_id` | `MutationAck` | `MailStoreWrite` | `EmailNotFound`, `InvalidInput`, `PermissionDenied`, `EffectUnavailable` |
+| `create_folder` | `mail:organize` | `context`, `account_id`, `name`, optional `parent_mailbox_id`, `favorite` | `FolderMutationData` | `MailStoreWrite` | `AccountNotFound`, `InvalidInput`, `Conflict`, `PermissionDenied`, `EffectUnavailable` |
+| `rename_folder` | `mail:organize` | `context`, `account_id`, `mailbox_id`, `new_name` | `FolderMutationData` | `MailStoreWrite` | `MailboxNotFound`, `PolicyDenied`, `InvalidInput`, `Conflict`, `PermissionDenied`, `EffectUnavailable` |
+| `delete_folder` | `mail:organize` | `context`, `account_id`, `mailbox_id`, `force` | `MutationAck` | `MailStoreDelete` | `MailboxNotFound`, `PolicyDenied`, `Conflict`, `PermissionDenied`, `EffectUnavailable` |
+| `get_unread_count` | `mail:read` | `context`, optional `account_id`, optional `snapshot`, `refresh` | `UnreadCountData` | `AccountCredentialRead`, `ImapFetch` | `AccountNotFound`, `PermissionDenied`, `EffectUnavailable` |
+| `create_rule` | `mail:organize` | `context`, `account_id`, `rule: MailRule` | `MailRule` or `MutationAck` | `MailStoreWrite` | `AccountNotFound`, `PolicyDenied`, `InvalidInput`, `Conflict`, `PermissionDenied`, `EffectUnavailable` |
+| `list_rules` | `mail:organize` | `context`, `account_id`, optional `snapshot`, `refresh` | `QueryCollection<MailRule>` | `MailStoreRead` | `AccountNotFound`, `PermissionDenied`, `EffectUnavailable` |
+| `delete_rule` | `mail:organize` | `context`, `account_id`, `rule_id` | `MutationAck` | `MailStoreDelete` | `RuleNotFound`, `PermissionDenied`, `EffectUnavailable` |
+| `schedule_send` | `mail:send` | `context`, `draft_id`, `account_id`, `scheduled_for`, optional `undo_window_seconds` | `SchedulePlan` | `MailStoreWrite`, `ScheduleJob` | `DraftNotFound`, `InvalidInput`, `PolicyDenied`, `PermissionDenied`, `EffectUnavailable` |
+| `cancel_scheduled_send` | `mail:send` | `context`, `job_id`, `account_id`, optional `draft_id` | `MutationAck` | `MailStoreWrite`, `CancelJob` | `ScheduledJobNotFound`, `PermissionDenied`, `EffectUnavailable` |
+
+## 6. Manifest-Only Admin Policy Contract
+
+Admin policy is not a user credential export. It belongs in `synapp.app.json` or a host admin policy registry, not in account setup tools.
+
+Fields: `allow_manual_imap_smtp`, `allowed_oauth_providers`, `allow_insecure_transport`, `min_sync_interval_minutes`, `max_recipients`, `allow_agent_send`, `require_review_for_agent_send`, `allow_permanent_delete`, `allow_rule_creation`, `attachment_max_bytes`, `connection_test_modes`.
+
+No per-user `account_id`, `email_address`, `username`, secret reference, alias, signature, or default sender is valid in admin policy.

@@ -7,6 +7,7 @@ const initialState = {
   hostCtx: getContext(),
   accounts: [],
   mailboxes: [],
+  loadingAccounts: false,
   activeAccountId: null,
   activeMailboxId: 'inbox',
   activeEmailId: null,
@@ -18,6 +19,10 @@ const initialState = {
   searchQuery: '',
   searchResults: null,
   searching: false,
+  activeRoute: 'inbox',
+  settingsSection: 'accounts',
+  selectedEmailIds: [],
+  activeFilter: 'all',
   composeOpen: false,
   composeDraftId: null,
   loadingMailboxes: false,
@@ -32,10 +37,12 @@ let nextToastId = 1;
 
 function reducer(state, action) {
   switch (action.type) {
-    case 'SET_ACCOUNTS': return { ...state, accounts: action.payload, activeAccountId: action.payload[0]?.account_id ?? null };
+    case 'SET_LOADING_ACCOUNTS': return { ...state, loadingAccounts: action.payload };
+    case 'SET_ACCOUNTS': return { ...state, accounts: action.payload, activeAccountId: state.activeAccountId ?? action.payload[0]?.account_id ?? null, loadingAccounts: false };
     case 'SET_MAILBOXES': return { ...state, mailboxes: action.payload };
     case 'SET_LOADING_MAILBOXES': return { ...state, loadingMailboxes: action.payload };
-    case 'SET_ACTIVE_MAILBOX': return { ...state, activeMailboxId: action.payload, activeEmailId: null, activeEmail: null, emails: [], searchQuery: '', searchResults: null };
+    case 'SET_ACTIVE_ACCOUNT': return { ...state, activeAccountId: action.payload, activeMailboxId: 'inbox', activeEmailId: null, activeEmail: null, emails: [], selectedEmailIds: [], searchQuery: '', searchResults: null, activeRoute: 'inbox' };
+    case 'SET_ACTIVE_MAILBOX': return { ...state, activeMailboxId: action.payload, activeEmailId: null, activeEmail: null, emails: [], selectedEmailIds: [], searchQuery: '', searchResults: null, activeRoute: 'inbox' };
     case 'SET_EMAILS': return { ...state, emails: action.payload.messages, emailsTotal: action.payload.total_count, emailsUnread: action.payload.unread_count, loadingEmails: false };
     case 'SET_LOADING_EMAILS': return { ...state, loadingEmails: action.payload };
     case 'SET_ACTIVE_EMAIL': return { ...state, activeEmailId: action.payload?.email_id ?? null, activeEmail: action.payload };
@@ -44,6 +51,17 @@ function reducer(state, action) {
     case 'SET_SEARCH_QUERY': return { ...state, searchQuery: action.payload };
     case 'SET_SEARCH_RESULTS': return { ...state, searchResults: action.payload, searching: false };
     case 'SET_SEARCHING': return { ...state, searching: action.payload };
+    case 'SET_ROUTE': return { ...state, activeRoute: action.payload.route, settingsSection: action.payload.settingsSection ?? state.settingsSection };
+    case 'SET_SETTINGS_SECTION': return { ...state, activeRoute: 'settings', settingsSection: action.payload };
+    case 'SET_FILTER': return { ...state, activeFilter: action.payload, selectedEmailIds: [] };
+    case 'TOGGLE_SELECTED_EMAIL': {
+      const selected = state.selectedEmailIds.includes(action.payload)
+        ? state.selectedEmailIds.filter(id => id !== action.payload)
+        : [...state.selectedEmailIds, action.payload];
+      return { ...state, selectedEmailIds: selected };
+    }
+    case 'SELECT_ALL_VISIBLE': return { ...state, selectedEmailIds: action.payload ? state.emails.map(email => email.email_id) : [] };
+    case 'CLEAR_SELECTION': return { ...state, selectedEmailIds: [] };
     case 'SET_COMPOSE': return { ...state, composeOpen: action.payload.open, composeDraftId: action.payload.draftId ?? null };
     case 'SET_SHOW_FOLDER_MANAGER': return { ...state, showFolderManager: action.payload };
     case 'SET_SHOW_RULES_MANAGER': return { ...state, showRulesManager: action.payload };
@@ -87,10 +105,12 @@ export function AppProvider({ children }) {
   const can = useCallback((perm) => hasPermission(state.hostCtx.permission, perm), [state.hostCtx.permission]);
 
   const loadAccounts = useCallback(async () => {
+    dispatch({ type: 'SET_LOADING_ACCOUNTS', payload: true });
     try {
       const res = await invoke('list_accounts');
       dispatch({ type: 'SET_ACCOUNTS', payload: res.data.snapshot });
     } catch (err) {
+      dispatch({ type: 'SET_LOADING_ACCOUNTS', payload: false });
       toast(`Failed to load accounts: ${err.message}`, 'error');
     }
   }, [toast]);
@@ -169,6 +189,45 @@ export function AppProvider({ children }) {
     }
   }, [toast, loadEmails, state.activeMailboxId, state.emailPage]);
 
+  const bulkMarkRead = useCallback(async (read) => {
+    if (state.selectedEmailIds.length === 0) return;
+    const emailIds = state.selectedEmailIds;
+    dispatch({ type: 'CLEAR_SELECTION' });
+    try {
+      await invoke('mark_read', { email_ids: emailIds, read });
+      toast(read ? 'Marked as read' : 'Marked as unread', 'success');
+      loadEmails(state.activeMailboxId, state.emailPage);
+    } catch (err) {
+      toast(`Mark failed: ${err.message}`, 'error');
+    }
+  }, [state.selectedEmailIds, state.activeMailboxId, state.emailPage, toast, loadEmails]);
+
+  const bulkArchive = useCallback(async () => {
+    if (state.selectedEmailIds.length === 0) return;
+    const emailIds = state.selectedEmailIds;
+    dispatch({ type: 'CLEAR_SELECTION' });
+    try {
+      await invoke('archive_email', { email_ids: emailIds, account_id: state.activeAccountId });
+      toast('Archived selected messages', 'success');
+      loadEmails(state.activeMailboxId, state.emailPage);
+    } catch (err) {
+      toast(`Archive failed: ${err.message}`, 'error');
+    }
+  }, [state.selectedEmailIds, state.activeAccountId, state.activeMailboxId, state.emailPage, toast, loadEmails]);
+
+  const bulkDelete = useCallback(async () => {
+    if (state.selectedEmailIds.length === 0) return;
+    const emailIds = state.selectedEmailIds;
+    dispatch({ type: 'CLEAR_SELECTION' });
+    try {
+      await invoke('delete_email', { email_ids: emailIds, account_id: state.activeAccountId, permanent: false });
+      toast('Moved selected messages to Trash', 'success');
+      loadEmails(state.activeMailboxId, state.emailPage);
+    } catch (err) {
+      toast(`Delete failed: ${err.message}`, 'error');
+    }
+  }, [state.selectedEmailIds, state.activeAccountId, state.activeMailboxId, state.emailPage, toast, loadEmails]);
+
   const search = useCallback((query) => {
     dispatch({ type: 'SET_SEARCH_QUERY', payload: query });
     if (searchTimer.current) clearTimeout(searchTimer.current);
@@ -201,6 +260,7 @@ export function AppProvider({ children }) {
     can, toast, removeToast,
     loadAccounts, loadMailboxes, loadEmails,
     selectEmail, flagEmail, archiveEmail, deleteEmail,
+    bulkMarkRead, bulkArchive, bulkDelete,
     search, openCompose, closeCompose,
   };
 

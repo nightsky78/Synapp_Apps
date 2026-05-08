@@ -15,6 +15,23 @@
     },
     "exports": [
       { "name": "list_accounts", "description": "List configured mail accounts from host-managed settings without exposing secrets.", "inputSchema": { "$ref": "#/definitions/ListAccountsInput" }, "outputSchema": { "$ref": "#/definitions/ResultEnvelope" } },
+      { "name": "get_provider_capabilities", "description": "Read host account provider policy and connector availability for user-scoped account setup.", "inputSchema": { "$ref": "#/definitions/GetProviderCapabilitiesInput" }, "outputSchema": { "$ref": "#/definitions/ResultEnvelope" } },
+      { "name": "validate_account_setup", "description": "Validate and normalize a user-scoped IMAP/SMTP or OAuth account setup draft without executing network I/O.", "inputSchema": { "$ref": "#/definitions/ValidateAccountSetupInput" }, "outputSchema": { "$ref": "#/definitions/ResultEnvelope" } },
+      { "name": "plan_connection_test", "description": "Plan host-owned IMAP/SMTP/folder connection test steps without performing protocol I/O in Wasm.", "inputSchema": { "$ref": "#/definitions/PlanConnectionTestInput" }, "outputSchema": { "$ref": "#/definitions/ResultEnvelope" } },
+      { "name": "complete_account_setup", "description": "Validate and plan persistence for a user-scoped account after sanitized host connection tests.", "inputSchema": { "$ref": "#/definitions/CompleteAccountSetupInput" }, "outputSchema": { "$ref": "#/definitions/ResultEnvelope" } },
+      { "name": "begin_oauth_account_setup", "description": "Plan host-owned OAuth authorization start for a supported mail provider.", "inputSchema": { "$ref": "#/definitions/BeginOAuthAccountSetupInput" }, "outputSchema": { "$ref": "#/definitions/ResultEnvelope" } },
+      { "name": "complete_oauth_account_setup", "description": "Convert a host-completed OAuth connection reference into a user mail account plan.", "inputSchema": { "$ref": "#/definitions/CompleteOAuthAccountSetupInput" }, "outputSchema": { "$ref": "#/definitions/ResultEnvelope" } },
+      { "name": "disconnect_oauth_account", "description": "Plan OAuth disconnect and optional account disable without removing local metadata by default.", "inputSchema": { "$ref": "#/definitions/DisconnectOAuthAccountInput" }, "outputSchema": { "$ref": "#/definitions/ResultEnvelope" } },
+      { "name": "remove_account", "description": "Plan removal or disablement of a user mail account and related host cleanup.", "inputSchema": { "$ref": "#/definitions/RemoveAccountInput" }, "outputSchema": { "$ref": "#/definitions/ResultEnvelope" } },
+      { "name": "list_identities", "description": "Read sender identities and signatures for account settings and compose selectors.", "inputSchema": { "$ref": "#/definitions/ListIdentitiesInput" }, "outputSchema": { "$ref": "#/definitions/ResultEnvelope" } },
+      { "name": "save_identity", "description": "Validate and plan saving a user sender identity or alias.", "inputSchema": { "$ref": "#/definitions/SaveIdentityInput" }, "outputSchema": { "$ref": "#/definitions/ResultEnvelope" } },
+      { "name": "delete_identity", "description": "Plan removal of a sender identity and default reassignment.", "inputSchema": { "$ref": "#/definitions/DeleteIdentityInput" }, "outputSchema": { "$ref": "#/definitions/ResultEnvelope" } },
+      { "name": "save_signature", "description": "Validate and plan saving a user mail signature.", "inputSchema": { "$ref": "#/definitions/SaveSignatureInput" }, "outputSchema": { "$ref": "#/definitions/ResultEnvelope" } },
+      { "name": "delete_signature", "description": "Plan deletion of a signature and cleanup of identity defaults.", "inputSchema": { "$ref": "#/definitions/DeleteSignatureInput" }, "outputSchema": { "$ref": "#/definitions/ResultEnvelope" } },
+      { "name": "get_user_preferences", "description": "Read user-scoped reading, compose, notification, and sync preferences.", "inputSchema": { "$ref": "#/definitions/GetUserPreferencesInput" }, "outputSchema": { "$ref": "#/definitions/ResultEnvelope" } },
+      { "name": "save_user_preferences", "description": "Validate and plan saving user-scoped mail preferences.", "inputSchema": { "$ref": "#/definitions/SaveUserPreferencesInput" }, "outputSchema": { "$ref": "#/definitions/ResultEnvelope" } },
+      { "name": "inspect_legacy_settings", "description": "Classify legacy settings for safe user-scoped migration without moving credentials into admin policy.", "inputSchema": { "$ref": "#/definitions/InspectLegacySettingsInput" }, "outputSchema": { "$ref": "#/definitions/ResultEnvelope" } },
+      { "name": "migrate_legacy_settings", "description": "Plan migration of legacy settings into user-scoped account and preference records.", "inputSchema": { "$ref": "#/definitions/MigrateLegacySettingsInput" }, "outputSchema": { "$ref": "#/definitions/ResultEnvelope" } },
       { "name": "get_account_status", "description": "Get sync and connection status for a configured account.", "inputSchema": { "$ref": "#/definitions/GetAccountStatusInput" }, "outputSchema": { "$ref": "#/definitions/ResultEnvelope" } },
       { "name": "list_mailboxes", "description": "List standard and custom folders for one account or the unified inbox.", "inputSchema": { "$ref": "#/definitions/ListMailboxesInput" }, "outputSchema": { "$ref": "#/definitions/ResultEnvelope" } },
       { "name": "read_emails", "description": "Fetch a paginated email list for a mailbox, including thread mode, focused inbox, filters, and sort state.", "inputSchema": { "$ref": "#/definitions/ReadEmailsInput" }, "outputSchema": { "$ref": "#/definitions/ResultEnvelope" } },
@@ -46,6 +63,23 @@
   "semanticInterface": {
     "tools": [
       { "name": "list_accounts", "description": "Inspect which user-approved accounts exist and which one is the default.", "category": "query", "capability": "mail:read" },
+      { "name": "get_provider_capabilities", "description": "Plan user-scoped account setup. Credentials and OAuth are handled by Synapp host secure services.", "category": "query", "capability": "mail:accounts" },
+      { "name": "validate_account_setup", "description": "Plan user-scoped account setup. Credentials and OAuth are handled by Synapp host secure services.", "category": "validation", "capability": "mail:accounts" },
+      { "name": "plan_connection_test", "description": "Validate and plan host-owned effects; does not perform protocol/network I/O inside Wasm.", "category": "mutation-plan", "capability": "mail:accounts" },
+      { "name": "complete_account_setup", "description": "Validate and plan host-owned effects; does not perform protocol/network I/O inside Wasm.", "category": "mutation", "capability": "mail:accounts" },
+      { "name": "begin_oauth_account_setup", "description": "Plan user-scoped account setup. Credentials and OAuth are handled by Synapp host secure services.", "category": "mutation-plan", "capability": "mail:accounts" },
+      { "name": "complete_oauth_account_setup", "description": "Validate and plan host-owned effects; does not perform protocol/network I/O inside Wasm.", "category": "mutation", "capability": "mail:accounts" },
+      { "name": "disconnect_oauth_account", "description": "Validate and plan host-owned effects; does not perform protocol/network I/O inside Wasm.", "category": "mutation", "capability": "mail:accounts" },
+      { "name": "remove_account", "description": "Validate and plan host-owned effects; does not perform protocol/network I/O inside Wasm.", "category": "mutation", "capability": "mail:accounts" },
+      { "name": "list_identities", "description": "Read host-managed mail/account data for the current user without exposing credentials.", "category": "query", "capability": "mail:accounts" },
+      { "name": "save_identity", "description": "Validate and plan host-owned effects; does not perform protocol/network I/O inside Wasm.", "category": "mutation", "capability": "mail:accounts" },
+      { "name": "delete_identity", "description": "Validate and plan host-owned effects; does not perform protocol/network I/O inside Wasm.", "category": "mutation", "capability": "mail:accounts" },
+      { "name": "save_signature", "description": "Validate and plan host-owned effects; does not perform protocol/network I/O inside Wasm.", "category": "mutation", "capability": "mail:accounts" },
+      { "name": "delete_signature", "description": "Validate and plan host-owned effects; does not perform protocol/network I/O inside Wasm.", "category": "mutation", "capability": "mail:accounts" },
+      { "name": "get_user_preferences", "description": "Read host-managed mail/account data for the current user without exposing credentials.", "category": "query", "capability": "mail:accounts" },
+      { "name": "save_user_preferences", "description": "Validate and plan host-owned effects; does not perform protocol/network I/O inside Wasm.", "category": "mutation", "capability": "mail:accounts" },
+      { "name": "inspect_legacy_settings", "description": "Classify or migrate legacy user settings; never migrate credentials into admin policy.", "category": "query", "capability": "mail:accounts" },
+      { "name": "migrate_legacy_settings", "description": "Classify or migrate legacy user settings; never migrate credentials into admin policy.", "category": "mutation", "capability": "mail:accounts" },
       { "name": "get_account_status", "description": "Inspect account health, sync freshness, and connection state.", "category": "query", "capability": "mail:read" },
       { "name": "list_mailboxes", "description": "List folders and unread counts for navigation or planning moves.", "category": "query", "capability": "mail:read" },
       { "name": "read_emails", "description": "Read a paginated mailbox view with structured filters and threading options.", "category": "query", "capability": "mail:read" },
@@ -78,6 +112,7 @@
     "required": [
       "AccountCredentialRead",
       "AccountCredentialWrite",
+      "ProviderCapabilityRead",
       "ImapFetch",
       "ImapSync",
       "SmtpSend",
@@ -85,6 +120,8 @@
       "NotifyUser",
       "ScheduleJob",
       "CancelJob",
+      "OAuthConnect",
+      "OAuthDisconnect",
       "StorePlatformSecret",
       "MailStoreRead",
       "MailStoreWrite",
@@ -103,11 +140,11 @@
           "additionalProperties": false,
           "required": ["user_id", "permission", "available_effects"],
           "properties": {
-            "user_id": { "type": "string", "minLength": 1 },
-            "permission": { "type": "string", "enum": ["none", "read", "draft", "send", "organize"] },
-            "available_effects": { "type": "array", "items": { "type": "string" } },
-            "agent_id": { "type": "string" },
-            "request_id": { "type": "string" }
+            "user_id": { "$ref": "#/definitions/HostId" },
+            "permission": { "type": "string", "enum": ["none", "read", "draft", "send", "organize", "accounts", "admin"] },
+            "available_effects": { "type": "array", "items": { "$ref": "#/definitions/HostId" }, "maxItems": 64 },
+            "agent_id": { "$ref": "#/definitions/HostId" },
+            "request_id": { "$ref": "#/definitions/HostId" }
           }
         }
       }
@@ -169,42 +206,319 @@
       }
     },
     "MailAccountSummary": { "type": "object" },
+    "HostId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._:/@-]+$"
+    },
+    "BoundedText": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[^\\x00-\\x1F\\x7F]+$"
+    },
+    "ServerSecretRef": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160,
+      "pattern": "^(host-secure-field|host-secret|oauth-connection|authorization):[A-Za-z0-9._:/@-]{1,128}$",
+      "description": "Opaque host-managed secret reference or one-time input reference. Raw credential values are forbidden."
+    },
+    "ServerConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "host", "username", "auth_method"],
+      "properties": {
+        "protocol": { "type": "string", "enum": ["imap", "smtp"] },
+        "host": { "type": "string", "minLength": 1, "maxLength": 255, "pattern": "^([A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)(\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$" },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "security": { "type": "string", "enum": ["ssl_tls", "starttls", "none"] },
+        "username": { "type": "string", "minLength": 1, "maxLength": 320, "pattern": "^[^\\s\\x00-\\x1F\\x7F]+$" },
+        "auth_method": { "type": "string", "enum": ["password", "app_password", "oauth2", "host_connector"] },
+        "secret_input_ref": { "$ref": "#/definitions/ServerSecretRef" },
+        "secret_ref": { "$ref": "#/definitions/ServerSecretRef" },
+        "use_incoming_secret": { "type": "boolean" },
+        "path_prefix": { "$ref": "#/definitions/HostId" }
+      }
+    },
+    "OAuthAccountConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider"],
+      "properties": {
+        "provider": { "$ref": "#/definitions/HostId" },
+        "connection_ref": { "$ref": "#/definitions/ServerSecretRef" },
+        "redirect_state_ref": { "$ref": "#/definitions/ServerSecretRef" },
+        "scopes": { "type": "array", "items": { "$ref": "#/definitions/HostId" }, "maxItems": 32 }
+      }
+    },
+    "AccountSyncConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "interval_minutes": { "type": "integer", "minimum": 5, "maximum": 1440 },
+        "initial_range": { "type": "string", "enum": ["7_days", "30_days", "90_days", "all"] },
+        "download_attachments": { "type": "string", "enum": ["never", "metadata_only", "wifi", "always"] },
+        "offline_cache": { "type": "boolean" }
+      }
+    },
+    "FolderMapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "inbox": { "type": "string" },
+        "sent": { "type": "string" },
+        "drafts": { "type": "string" },
+        "trash": { "type": "string" },
+        "archive": { "type": "string" },
+        "junk": { "type": "string" }
+      }
+    },
+    "UserMailAccountSetup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["account_label", "display_name", "email_address", "provider", "auth_method"],
+      "properties": {
+        "account_id": { "$ref": "#/definitions/HostId" },
+        "revision": { "$ref": "#/definitions/HostId" },
+        "account_label": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "display_name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "email_address": { "type": "string", "format": "email", "maxLength": 320 },
+        "reply_to": { "type": "string", "format": "email", "maxLength": 320 },
+        "provider": { "$ref": "#/definitions/HostId" },
+        "auth_method": { "type": "string", "enum": ["password", "app_password", "oauth2", "host_connector"] },
+        "incoming": { "$ref": "#/definitions/ServerConfig" },
+        "outgoing": { "$ref": "#/definitions/ServerConfig" },
+        "oauth": { "$ref": "#/definitions/OAuthAccountConfig" },
+        "sync": { "$ref": "#/definitions/AccountSyncConfig" },
+        "folder_mapping": { "$ref": "#/definitions/FolderMapping" },
+        "desired_status": { "type": "string", "enum": ["active", "disabled", "incomplete", "receive_only"] }
+      }
+    },
+    "ProviderCapabilities": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "providers": { "type": "array", "items": { "type": "object" } },
+        "manual_imap_smtp": { "type": "object" },
+        "policy": { "type": "object" },
+        "oauth_placeholders": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "ConnectionTestStepResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["step", "state"],
+      "properties": {
+        "step": { "type": "string", "enum": ["imap_auth", "imap_mailbox_discovery", "smtp_auth", "smtp_send_capability", "folder_mapping"] },
+        "state": { "type": "string", "enum": ["not_tested", "testing", "passed", "warning", "failed"] },
+        "code": { "type": "string" },
+        "message": { "type": "string" },
+        "field_paths": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "ConnectionTestResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "test_id": { "type": "string" },
+        "steps": { "type": "array", "items": { "$ref": "#/definitions/ConnectionTestStepResult" } }
+      }
+    },
+    "UserMailPreferences": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reading", "compose", "notifications", "sync_defaults"],
+      "properties": {
+        "reading": { "type": "object" },
+        "compose": { "type": "object" },
+        "notifications": { "type": "object" },
+        "sync_defaults": { "type": "object" }
+      }
+    },
+    "MailIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["identity_id", "account_id", "kind", "display_name", "email_address", "enabled", "is_default_for_account", "is_global_default", "verification_state"],
+      "properties": {
+        "identity_id": { "type": "string" },
+        "account_id": { "type": "string" },
+        "kind": { "type": "string", "enum": ["primary", "alias", "send_as"] },
+        "display_name": { "type": "string", "minLength": 1 },
+        "email_address": { "type": "string", "format": "email" },
+        "reply_to": { "type": "string", "format": "email" },
+        "signature_id": { "type": "string" },
+        "enabled": { "type": "boolean" },
+        "is_default_for_account": { "type": "boolean" },
+        "is_global_default": { "type": "boolean" },
+        "verification_state": { "type": "string" }
+      }
+    },
+    "MailSignature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["signature_id", "account_id", "label", "enabled", "use_for_new", "use_for_replies", "use_for_forwards"],
+      "properties": {
+        "signature_id": { "type": "string" },
+        "account_id": { "type": "string" },
+        "identity_id": { "type": "string" },
+        "label": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "body_html": { "type": "string", "maxLength": 512000 },
+        "body_text": { "type": "string", "maxLength": 512000 },
+        "enabled": { "type": "boolean" },
+        "use_for_new": { "type": "boolean" },
+        "use_for_replies": { "type": "boolean" },
+        "use_for_forwards": { "type": "boolean" }
+      }
+    },
+    "LegacySettings": { "type": "object", "additionalProperties": true },
     "MailAccountStatus": { "type": "object" },
     "Mailbox": { "type": "object" },
-    "Pagination": { "type": "object" },
-    "SortSpec": { "type": "object" },
-    "SearchFilters": { "type": "object" },
+    "EmailAddress": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["email"],
+      "properties": {
+        "email": { "type": "string", "format": "email", "maxLength": 320, "pattern": "^[^\\s\\x00-\\x1F\\x7F]+@[^\\s\\x00-\\x1F\\x7F]+$" },
+        "display_name": { "type": "string", "maxLength": 120, "pattern": "^[^\\x00-\\x1F\\x7F]*$" }
+      }
+    },
+    "Pagination": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["offset", "limit"],
+      "properties": {
+        "offset": { "type": "integer", "minimum": 0 },
+        "limit": { "type": "integer", "minimum": 1, "maximum": 100 }
+      }
+    },
+    "SortSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field", "direction"],
+      "properties": {
+        "field": { "type": "string", "enum": ["received_at", "sent_at", "subject", "from", "importance", "is_read", "is_flagged"] },
+        "direction": { "type": "string", "enum": ["asc", "desc"] }
+      }
+    },
+    "SearchFilters": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "from": { "$ref": "#/definitions/BoundedText" },
+        "to": { "$ref": "#/definitions/BoundedText" },
+        "subject_contains": { "$ref": "#/definitions/BoundedText" },
+        "body_contains": { "$ref": "#/definitions/BoundedText" },
+        "has_attachments": { "type": "boolean" },
+        "unread": { "type": "boolean" },
+        "flagged": { "type": "boolean" },
+        "importance": { "type": "string", "enum": ["low", "normal", "high"] },
+        "account_ids": { "type": "array", "items": { "$ref": "#/definitions/HostId" }, "maxItems": 64 },
+        "mailbox_ids": { "type": "array", "items": { "$ref": "#/definitions/HostId" }, "maxItems": 64 },
+        "before": { "type": "integer" },
+        "after": { "type": "integer" }
+      }
+    },
     "EmailPageSnapshot": { "type": "object" },
     "SearchSnapshot": { "type": "object" },
     "EmailMessage": { "type": "object" },
-    "DraftDocument": { "type": "object" },
-    "MailRule": { "type": "object" },
+    "DraftDocument": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["account_id", "to", "subject"],
+      "properties": {
+        "draft_id": { "$ref": "#/definitions/HostId" },
+        "account_id": { "$ref": "#/definitions/HostId" },
+        "to": { "type": "array", "items": { "$ref": "#/definitions/EmailAddress" }, "minItems": 1, "maxItems": 100 },
+        "cc": { "type": "array", "items": { "$ref": "#/definitions/EmailAddress" }, "maxItems": 100 },
+        "bcc": { "type": "array", "items": { "$ref": "#/definitions/EmailAddress" }, "maxItems": 100 },
+        "subject": { "type": "string", "maxLength": 998, "pattern": "^[^\\x00-\\x1F\\x7F]*$" },
+        "body_html": { "type": "string", "maxLength": 512000 },
+        "body_text": { "type": "string", "maxLength": 512000 },
+        "attachments": { "type": "array", "maxItems": 100 },
+        "signature": { "type": "string", "maxLength": 512000 },
+        "importance": { "type": "string", "enum": ["low", "normal", "high"] },
+        "request_read_receipt": { "type": "boolean" },
+        "scheduled_send_at": { "type": "integer" }
+      }
+    },
+    "RuleCondition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field", "operator", "value"],
+      "properties": {
+        "field": { "type": "string", "enum": ["from", "to", "cc", "subject", "body", "importance", "account_id", "mailbox_id", "has_attachments", "unread", "flagged"] },
+        "operator": { "type": "string", "enum": ["equals", "contains", "starts_with", "ends_with", "exists", "not_exists"] },
+        "value": { "oneOf": [ { "$ref": "#/definitions/BoundedText" }, { "type": "boolean" }, { "type": "array", "items": { "$ref": "#/definitions/BoundedText" }, "maxItems": 64 } ] }
+      }
+    },
+    "RuleAction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action_type", "value"],
+      "properties": {
+        "action_type": { "type": "string", "enum": ["move_to", "copy_to", "mark_read", "mark_unread", "flag", "unflag", "delete", "archive", "categorize", "stop"] },
+        "value": { "oneOf": [ { "$ref": "#/definitions/HostId" }, { "$ref": "#/definitions/BoundedText" }, { "type": "boolean" }, { "type": "null" } ] }
+      }
+    },
+    "MailRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rule_id", "name", "enabled", "stop_processing", "priority", "conditions", "actions"],
+      "properties": {
+        "rule_id": { "$ref": "#/definitions/HostId" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120, "pattern": "^[^\\x00-\\x1F\\x7F]+$" },
+        "enabled": { "type": "boolean" },
+        "stop_processing": { "type": "boolean" },
+        "priority": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "conditions": { "type": "array", "items": { "$ref": "#/definitions/RuleCondition" }, "minItems": 1, "maxItems": 10 },
+        "actions": { "type": "array", "items": { "$ref": "#/definitions/RuleAction" }, "minItems": 1, "maxItems": 10 }
+      }
+    },
     "ListAccountsInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "properties": { "snapshot": { "type": "array", "items": { "$ref": "#/definitions/MailAccountSummary" } }, "refresh": { "type": "boolean" } } } ] },
-    "GetAccountStatusInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["account_id"], "properties": { "account_id": { "type": "string" }, "snapshot": { "$ref": "#/definitions/MailAccountStatus" }, "refresh": { "type": "boolean" } } } ] },
-    "ListMailboxesInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "properties": { "account_id": { "type": "string" }, "snapshot": { "type": "array", "items": { "$ref": "#/definitions/Mailbox" } }, "include_favorites": { "type": "boolean" }, "refresh": { "type": "boolean" } } } ] },
-    "ReadEmailsInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["mailbox_id"], "properties": { "account_id": { "type": "string" }, "mailbox_id": { "type": "string" }, "pagination": { "$ref": "#/definitions/Pagination" }, "sort": { "$ref": "#/definitions/SortSpec" }, "filters": { "$ref": "#/definitions/SearchFilters" }, "thread_view": { "type": "boolean" }, "focused_inbox": { "type": "boolean" }, "snapshot": { "$ref": "#/definitions/EmailPageSnapshot" }, "refresh": { "type": "boolean" } } } ] },
-    "SearchEmailsInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["query"], "properties": { "query": { "type": "string" }, "pagination": { "$ref": "#/definitions/Pagination" }, "filters": { "$ref": "#/definitions/SearchFilters" }, "snapshot": { "$ref": "#/definitions/SearchSnapshot" }, "refresh": { "type": "boolean" } } } ] },
-    "GetEmailInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["email_id"], "properties": { "email_id": { "type": "string" }, "account_id": { "type": "string" }, "snapshot": { "$ref": "#/definitions/EmailMessage" }, "mark_read": { "type": "boolean" }, "refresh": { "type": "boolean" } } } ] },
-    "GetThreadInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["thread_id"], "properties": { "thread_id": { "type": "string" }, "account_id": { "type": "string" }, "snapshot": { "type": "array", "items": { "$ref": "#/definitions/EmailMessage" } }, "refresh": { "type": "boolean" } } } ] },
-    "MarkReadInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["email_ids", "read"], "properties": { "email_ids": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 250 }, "read": { "type": "boolean" }, "account_id": { "type": "string" }, "mailbox_id": { "type": "string" } } } ] },
-    "FlagEmailInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["email_ids", "flagged"], "properties": { "email_ids": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 250 }, "flagged": { "type": "boolean" }, "account_id": { "type": "string" } } } ] },
+    "GetProviderCapabilitiesInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "properties": { "provider_ids": { "type": "array", "items": { "$ref": "#/definitions/HostId" }, "maxItems": 32 } } } ] },
+    "ValidateAccountSetupInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["account"], "properties": { "account": { "$ref": "#/definitions/UserMailAccountSetup" }, "admin_policy_snapshot": { "$ref": "#/definitions/ProviderCapabilities" }, "existing_account_snapshot": { "$ref": "#/definitions/UserMailAccountSetup" } } } ] },
+    "PlanConnectionTestInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["account", "test_scope"], "properties": { "account": { "$ref": "#/definitions/UserMailAccountSetup" }, "test_scope": { "type": "string", "enum": ["all", "incoming", "outgoing", "folder_mapping"] }, "admin_policy_snapshot": { "$ref": "#/definitions/ProviderCapabilities" } } } ] },
+    "CompleteAccountSetupInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["account"], "properties": { "account": { "$ref": "#/definitions/UserMailAccountSetup" }, "connection_test_result": { "$ref": "#/definitions/ConnectionTestResult" }, "make_default": { "type": "boolean" }, "save_mode": { "type": "string", "enum": ["active", "receive_only", "disabled", "incomplete"] } } } ] },
+    "BeginOAuthAccountSetupInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["provider", "email_address"], "properties": { "provider": { "$ref": "#/definitions/HostId" }, "email_address": { "type": "string", "format": "email", "maxLength": 320 }, "account_label": { "type": "string", "maxLength": 120, "pattern": "^[^\\x00-\\x1F\\x7F]*$" }, "requested_scopes": { "type": "array", "items": { "$ref": "#/definitions/HostId" }, "maxItems": 32 }, "redirect_route": { "type": "string", "maxLength": 256, "pattern": "^[^\\x00-\\x1F\\x7F]+$" } } } ] },
+    "CompleteOAuthAccountSetupInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["provider", "authorization_ref", "oauth_connection_ref"], "properties": { "provider": { "$ref": "#/definitions/HostId" }, "authorization_ref": { "$ref": "#/definitions/ServerSecretRef" }, "oauth_connection_ref": { "$ref": "#/definitions/ServerSecretRef" }, "account": { "$ref": "#/definitions/UserMailAccountSetup" }, "connection_test_result": { "$ref": "#/definitions/ConnectionTestResult" } } } ] },
+    "DisconnectOAuthAccountInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["account_id"], "properties": { "account_id": { "$ref": "#/definitions/HostId" }, "oauth_connection_ref": { "$ref": "#/definitions/ServerSecretRef" }, "disable_account": { "type": "boolean" } } } ] },
+    "RemoveAccountInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["account_id", "remove_local_cache", "cancel_scheduled_sends"], "properties": { "account_id": { "type": "string" }, "remove_local_cache": { "type": "boolean" }, "cancel_scheduled_sends": { "type": "boolean" }, "delete_drafts": { "type": "boolean" }, "revision": { "type": "string" } } } ] },
+    "ListIdentitiesInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "properties": { "account_id": { "type": "string" }, "snapshot": { "type": "object", "properties": { "identities": { "type": "array", "items": { "$ref": "#/definitions/MailIdentity" } }, "signatures": { "type": "array", "items": { "$ref": "#/definitions/MailSignature" } } } } } } ] },
+    "SaveIdentityInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["identity"], "properties": { "identity": { "$ref": "#/definitions/MailIdentity" }, "revision": { "type": "string" } } } ] },
+    "DeleteIdentityInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["identity_id"], "properties": { "identity_id": { "type": "string" }, "account_id": { "type": "string" }, "force": { "type": "boolean" } } } ] },
+    "SaveSignatureInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["signature"], "properties": { "signature": { "$ref": "#/definitions/MailSignature" }, "revision": { "type": "string" } } } ] },
+    "DeleteSignatureInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["signature_id"], "properties": { "signature_id": { "type": "string" }, "account_id": { "type": "string" }, "force": { "type": "boolean" } } } ] },
+    "GetUserPreferencesInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "properties": { "snapshot": { "$ref": "#/definitions/UserMailPreferences" }, "include_defaults": { "type": "boolean" } } } ] },
+    "SaveUserPreferencesInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["preferences"], "properties": { "preferences": { "$ref": "#/definitions/UserMailPreferences" }, "revision": { "type": "string" } } } ] },
+    "InspectLegacySettingsInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "properties": { "legacy_settings": { "$ref": "#/definitions/LegacySettings" } } } ] },
+    "MigrateLegacySettingsInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["legacy_settings"], "properties": { "legacy_settings": { "$ref": "#/definitions/LegacySettings" }, "migration_options": { "type": "object" }, "dry_run": { "type": "boolean" } } } ] },
+    "GetAccountStatusInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["account_id"], "properties": { "account_id": { "$ref": "#/definitions/HostId" }, "snapshot": { "$ref": "#/definitions/MailAccountStatus" }, "refresh": { "type": "boolean" } } } ] },
+    "ListMailboxesInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "properties": { "account_id": { "$ref": "#/definitions/HostId" }, "snapshot": { "type": "array", "items": { "$ref": "#/definitions/Mailbox" }, "maxItems": 250 }, "include_favorites": { "type": "boolean" }, "refresh": { "type": "boolean" } } } ] },
+    "ReadEmailsInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["mailbox_id"], "properties": { "account_id": { "$ref": "#/definitions/HostId" }, "mailbox_id": { "$ref": "#/definitions/HostId" }, "pagination": { "$ref": "#/definitions/Pagination" }, "sort": { "$ref": "#/definitions/SortSpec" }, "filters": { "$ref": "#/definitions/SearchFilters" }, "thread_view": { "type": "boolean" }, "focused_inbox": { "type": "boolean" }, "snapshot": { "$ref": "#/definitions/EmailPageSnapshot" }, "refresh": { "type": "boolean" } } } ] },
+    "SearchEmailsInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["query"], "properties": { "query": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[^\\x00-\\x1F\\x7F]+$" }, "pagination": { "$ref": "#/definitions/Pagination" }, "filters": { "$ref": "#/definitions/SearchFilters" }, "snapshot": { "$ref": "#/definitions/SearchSnapshot" }, "refresh": { "type": "boolean" } } } ] },
+    "GetEmailInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["email_id"], "properties": { "email_id": { "$ref": "#/definitions/HostId" }, "account_id": { "$ref": "#/definitions/HostId" }, "snapshot": { "$ref": "#/definitions/EmailMessage" }, "mark_read": { "type": "boolean" }, "refresh": { "type": "boolean" } } } ] },
+    "GetThreadInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["thread_id"], "properties": { "thread_id": { "$ref": "#/definitions/HostId" }, "account_id": { "$ref": "#/definitions/HostId" }, "snapshot": { "type": "array", "items": { "$ref": "#/definitions/EmailMessage" }, "maxItems": 250 }, "refresh": { "type": "boolean" } } } ] },
+    "MarkReadInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["email_ids", "read"], "properties": { "email_ids": { "type": "array", "items": { "$ref": "#/definitions/HostId" }, "minItems": 1, "maxItems": 250 }, "read": { "type": "boolean" }, "account_id": { "$ref": "#/definitions/HostId" }, "mailbox_id": { "$ref": "#/definitions/HostId" } } } ] },
+    "FlagEmailInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["email_ids", "flagged"], "properties": { "email_ids": { "type": "array", "items": { "$ref": "#/definitions/HostId" }, "minItems": 1, "maxItems": 250 }, "flagged": { "type": "boolean" }, "account_id": { "$ref": "#/definitions/HostId" } } } ] },
     "DraftEmailInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["draft"], "properties": { "draft": { "$ref": "#/definitions/DraftDocument" }, "autocomplete_recipients": { "type": "boolean" } } } ] },
     "UpdateDraftInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["draft"], "properties": { "draft": { "$ref": "#/definitions/DraftDocument" } } } ] },
-    "DiscardDraftInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["draft_id"], "properties": { "draft_id": { "type": "string" }, "account_id": { "type": "string" } } } ] },
-    "SendEmailInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["draft_id", "account_id"], "properties": { "draft_id": { "type": "string" }, "account_id": { "type": "string" }, "undo_window_seconds": { "type": "integer", "enum": [0, 5, 10, 30] }, "notify": { "type": "boolean" } } } ] },
-    "ReplyEmailInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["email_id", "account_id"], "properties": { "email_id": { "type": "string" }, "account_id": { "type": "string" }, "body_html": { "type": "string" }, "body_text": { "type": "string" }, "include_original": { "type": "boolean" }, "reply_all": { "type": "boolean" }, "send_now": { "type": "boolean" }, "undo_window_seconds": { "type": "integer", "enum": [0, 5, 10, 30] } } } ] },
-    "ForwardEmailInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["email_id", "account_id", "to"], "properties": { "email_id": { "type": "string" }, "account_id": { "type": "string" }, "to": { "type": "array" }, "cc": { "type": "array" }, "bcc": { "type": "array" }, "note_html": { "type": "string" }, "note_text": { "type": "string" }, "send_now": { "type": "boolean" }, "undo_window_seconds": { "type": "integer", "enum": [0, 5, 10, 30] } } } ] },
-    "MoveEmailInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["email_ids", "destination_mailbox_id"], "properties": { "email_ids": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 250 }, "destination_mailbox_id": { "type": "string" }, "account_id": { "type": "string" } } } ] },
-    "DeleteEmailInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["email_ids"], "properties": { "email_ids": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 250 }, "account_id": { "type": "string" }, "permanent": { "type": "boolean" } } } ] },
-    "ArchiveEmailInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["email_ids"], "properties": { "email_ids": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 250 }, "account_id": { "type": "string" } } } ] },
-    "CreateFolderInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["account_id", "name"], "properties": { "account_id": { "type": "string" }, "name": { "type": "string", "maxLength": 128 }, "parent_mailbox_id": { "type": "string" }, "favorite": { "type": "boolean" } } } ] },
-    "RenameFolderInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["account_id", "mailbox_id", "new_name"], "properties": { "account_id": { "type": "string" }, "mailbox_id": { "type": "string" }, "new_name": { "type": "string", "maxLength": 128 } } } ] },
-    "DeleteFolderInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["account_id", "mailbox_id"], "properties": { "account_id": { "type": "string" }, "mailbox_id": { "type": "string" }, "force": { "type": "boolean" } } } ] },
+    "DiscardDraftInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["draft_id"], "properties": { "draft_id": { "$ref": "#/definitions/HostId" }, "account_id": { "$ref": "#/definitions/HostId" } } } ] },
+    "SendEmailInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["draft_id", "account_id"], "properties": { "draft_id": { "$ref": "#/definitions/HostId" }, "account_id": { "$ref": "#/definitions/HostId" }, "undo_window_seconds": { "type": "integer", "enum": [0, 5, 10, 30] }, "notify": { "type": "boolean" } } } ] },
+    "ReplyEmailInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["email_id", "account_id"], "properties": { "email_id": { "$ref": "#/definitions/HostId" }, "account_id": { "$ref": "#/definitions/HostId" }, "body_html": { "type": "string", "maxLength": 512000 }, "body_text": { "type": "string", "maxLength": 512000 }, "include_original": { "type": "boolean" }, "reply_all": { "type": "boolean" }, "send_now": { "type": "boolean" }, "undo_window_seconds": { "type": "integer", "enum": [0, 5, 10, 30] } } } ] },
+    "ForwardEmailInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["email_id", "account_id", "to"], "properties": { "email_id": { "$ref": "#/definitions/HostId" }, "account_id": { "$ref": "#/definitions/HostId" }, "to": { "type": "array", "items": { "$ref": "#/definitions/EmailAddress" }, "minItems": 1, "maxItems": 100 }, "cc": { "type": "array", "items": { "$ref": "#/definitions/EmailAddress" }, "maxItems": 100 }, "bcc": { "type": "array", "items": { "$ref": "#/definitions/EmailAddress" }, "maxItems": 100 }, "note_html": { "type": "string", "maxLength": 512000 }, "note_text": { "type": "string", "maxLength": 512000 }, "send_now": { "type": "boolean" }, "undo_window_seconds": { "type": "integer", "enum": [0, 5, 10, 30] } } } ] },
+    "MoveEmailInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["email_ids", "destination_mailbox_id"], "properties": { "email_ids": { "type": "array", "items": { "$ref": "#/definitions/HostId" }, "minItems": 1, "maxItems": 250 }, "destination_mailbox_id": { "$ref": "#/definitions/HostId" }, "account_id": { "$ref": "#/definitions/HostId" } } } ] },
+    "DeleteEmailInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["email_ids"], "properties": { "email_ids": { "type": "array", "items": { "$ref": "#/definitions/HostId" }, "minItems": 1, "maxItems": 250 }, "account_id": { "$ref": "#/definitions/HostId" }, "permanent": { "type": "boolean" } } } ] },
+    "ArchiveEmailInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["email_ids"], "properties": { "email_ids": { "type": "array", "items": { "$ref": "#/definitions/HostId" }, "minItems": 1, "maxItems": 250 }, "account_id": { "$ref": "#/definitions/HostId" } } } ] },
+    "CreateFolderInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["account_id", "name"], "properties": { "account_id": { "$ref": "#/definitions/HostId" }, "name": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[^\\x00-\\x1F\\x7F]+$" }, "parent_mailbox_id": { "$ref": "#/definitions/HostId" }, "favorite": { "type": "boolean" } } } ] },
+    "RenameFolderInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["account_id", "mailbox_id", "new_name"], "properties": { "account_id": { "$ref": "#/definitions/HostId" }, "mailbox_id": { "$ref": "#/definitions/HostId" }, "new_name": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[^\\x00-\\x1F\\x7F]+$" } } } ] },
+    "DeleteFolderInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["account_id", "mailbox_id"], "properties": { "account_id": { "$ref": "#/definitions/HostId" }, "mailbox_id": { "$ref": "#/definitions/HostId" }, "force": { "type": "boolean" } } } ] },
     "GetUnreadCountInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "properties": { "account_id": { "type": "string" }, "snapshot": { "type": "array" }, "refresh": { "type": "boolean" } } } ] },
-    "CreateRuleInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["account_id", "rule"], "properties": { "account_id": { "type": "string" }, "rule": { "$ref": "#/definitions/MailRule" } } } ] },
-    "ListRulesInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["account_id"], "properties": { "account_id": { "type": "string" }, "snapshot": { "type": "array" }, "refresh": { "type": "boolean" } } } ] },
-    "DeleteRuleInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["account_id", "rule_id"], "properties": { "account_id": { "type": "string" }, "rule_id": { "type": "string" } } } ] },
-    "ScheduleSendInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["draft_id", "account_id", "scheduled_for"], "properties": { "draft_id": { "type": "string" }, "account_id": { "type": "string" }, "scheduled_for": { "type": "integer" }, "undo_window_seconds": { "type": "integer", "enum": [0, 5, 10, 30] } } } ] },
-    "CancelScheduledSendInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["job_id", "account_id"], "properties": { "job_id": { "type": "string" }, "account_id": { "type": "string" }, "draft_id": { "type": "string" } } } ] }
+    "CreateRuleInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["account_id", "rule"], "properties": { "account_id": { "$ref": "#/definitions/HostId" }, "rule": { "$ref": "#/definitions/MailRule" } } } ] },
+    "ListRulesInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["account_id"], "properties": { "account_id": { "$ref": "#/definitions/HostId" }, "snapshot": { "type": "array", "items": { "$ref": "#/definitions/MailRule" }, "maxItems": 250 }, "refresh": { "type": "boolean" } } } ] },
+    "DeleteRuleInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["account_id", "rule_id"], "properties": { "account_id": { "$ref": "#/definitions/HostId" }, "rule_id": { "$ref": "#/definitions/HostId" } } } ] },
+    "ScheduleSendInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["draft_id", "account_id", "scheduled_for"], "properties": { "draft_id": { "$ref": "#/definitions/HostId" }, "account_id": { "$ref": "#/definitions/HostId" }, "scheduled_for": { "type": "integer" }, "undo_window_seconds": { "type": "integer", "enum": [0, 5, 10, 30] } } } ] },
+    "CancelScheduledSendInput": { "allOf": [ { "$ref": "#/definitions/RequestEnvelope" }, { "type": "object", "required": ["job_id", "account_id"], "properties": { "job_id": { "$ref": "#/definitions/HostId" }, "account_id": { "$ref": "#/definitions/HostId" }, "draft_id": { "$ref": "#/definitions/HostId" } } } ] }
   }
 }

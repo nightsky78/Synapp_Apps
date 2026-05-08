@@ -9,10 +9,21 @@ const MAX_RECIPIENTS: usize = 100;
 const MAX_SUBJECT_LENGTH: usize = 998;
 const MAX_FOLDER_NAME_LENGTH: usize = 128;
 const MAX_RULE_NAME_LENGTH: usize = 120;
+const MAX_HOST_ID_LENGTH: usize = 128;
+const MAX_SEARCH_QUERY_LENGTH: usize = 256;
+const MAX_FILTER_TEXT_LENGTH: usize = 256;
+const MAX_FILTER_IDS: usize = 64;
+const MAX_RULE_CONDITIONS: usize = 10;
+const MAX_RULE_ACTIONS: usize = 10;
 const MAX_BODY_LENGTH: usize = 512_000;
 const MAX_ALLOWED_UNDO_SECONDS: u32 = 30;
 
 const EFFECT_ACCOUNT_CREDENTIAL_READ: &str = "AccountCredentialRead";
+const EFFECT_ACCOUNT_CREDENTIAL_WRITE: &str = "AccountCredentialWrite";
+const EFFECT_PROVIDER_CAPABILITY_READ: &str = "ProviderCapabilityRead";
+const EFFECT_STORE_PLATFORM_SECRET: &str = "StorePlatformSecret";
+const EFFECT_OAUTH_CONNECT: &str = "OAuthConnect";
+const EFFECT_OAUTH_DISCONNECT: &str = "OAuthDisconnect";
 const EFFECT_IMAP_FETCH: &str = "ImapFetch";
 const EFFECT_IMAP_SYNC: &str = "ImapSync";
 const EFFECT_SMTP_SEND: &str = "SmtpSend";
@@ -31,6 +42,8 @@ enum Permission {
     Draft,
     Send,
     Organize,
+    Accounts,
+    Admin,
 }
 
 impl Permission {
@@ -41,6 +54,8 @@ impl Permission {
             "draft" => Ok(Self::Draft),
             "send" => Ok(Self::Send),
             "organize" => Ok(Self::Organize),
+            "accounts" => Ok(Self::Accounts),
+            "admin" => Ok(Self::Admin),
             _ => Err(ErrorResponse::new(
                 "InvalidInput",
                 format!("Unknown permission level: {value}"),
@@ -50,7 +65,9 @@ impl Permission {
 
     fn satisfies(self, required: Self) -> bool {
         match self {
-            Self::Organize => true,
+            Self::Admin => true,
+            Self::Accounts => matches!(required, Self::None | Self::Read | Self::Accounts),
+            Self::Organize => matches!(required, Self::None | Self::Read | Self::Organize),
             Self::Send => matches!(required, Self::None | Self::Read | Self::Draft | Self::Send),
             Self::Draft => matches!(required, Self::None | Self::Read | Self::Draft),
             Self::Read => matches!(required, Self::None | Self::Read),
@@ -131,14 +148,16 @@ impl RequestContext {
         Permission::parse(&self.permission)
     }
 
-    fn idempotency_key(&self, operation: &'static str, seed: &str) -> String {
+    fn idempotency_key(&self, operation: &'static str, effect: &str, seed: &str) -> String {
+        let payload_hash = hash_text(seed);
         if let Some(request_id) = &self.request_id {
-            // Prepend user_id so a caller-supplied request_id can never collide
-            // with another user's idempotency key on the host.
-            return format!("{operation}:{}:{request_id}", self.user_id);
+            return format!(
+                "{operation}:{}:{effect}:{}:{request_id}",
+                self.user_id, payload_hash
+            );
         }
 
-        format!("{operation}:{}", hash_text(&format!("{}:{seed}", self.user_id)))
+        format!("{operation}:{}:{effect}:{payload_hash}", self.user_id)
     }
 }
 
@@ -353,6 +372,418 @@ struct SearchSnapshot {
 struct UnreadCount {
     mailbox_id: String,
     unread_count: u32,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct ServerConfig {
+    protocol: String,
+    host: String,
+    #[serde(default)]
+    port: Option<u16>,
+    #[serde(default)]
+    security: Option<String>,
+    username: String,
+    auth_method: String,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    secret_input_ref: Option<String>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    secret_ref: Option<String>,
+    #[serde(default)]
+    use_incoming_secret: Option<bool>,
+    #[serde(default)]
+    path_prefix: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct OAuthAccountConfig {
+    provider: String,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    connection_ref: Option<String>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    redirect_state_ref: Option<String>,
+    #[serde(default)]
+    scopes: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct AccountSyncConfig {
+    #[serde(default)]
+    interval_minutes: Option<u32>,
+    #[serde(default)]
+    initial_range: Option<String>,
+    #[serde(default)]
+    download_attachments: Option<String>,
+    #[serde(default)]
+    offline_cache: Option<bool>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct FolderMapping {
+    #[serde(default)]
+    inbox: Option<String>,
+    #[serde(default)]
+    sent: Option<String>,
+    #[serde(default)]
+    drafts: Option<String>,
+    #[serde(default)]
+    trash: Option<String>,
+    #[serde(default)]
+    archive: Option<String>,
+    #[serde(default)]
+    junk: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct UserMailAccountSetup {
+    #[serde(default)]
+    account_id: Option<String>,
+    #[serde(default)]
+    revision: Option<String>,
+    account_label: String,
+    display_name: String,
+    email_address: String,
+    #[serde(default)]
+    reply_to: Option<String>,
+    provider: String,
+    auth_method: String,
+    #[serde(default)]
+    incoming: Option<ServerConfig>,
+    #[serde(default)]
+    outgoing: Option<ServerConfig>,
+    #[serde(default)]
+    oauth: Option<OAuthAccountConfig>,
+    #[serde(default)]
+    sync: Option<AccountSyncConfig>,
+    #[serde(default)]
+    folder_mapping: Option<FolderMapping>,
+    #[serde(default)]
+    desired_status: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+struct ProviderCapabilities {
+    #[serde(default)]
+    providers: Vec<Value>,
+    #[serde(default)]
+    manual_imap_smtp: Value,
+    #[serde(default)]
+    policy: Value,
+    #[serde(default)]
+    oauth_placeholders: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+struct ConnectionTestStepResult {
+    step: String,
+    state: String,
+    #[serde(default)]
+    code: Option<String>,
+    #[serde(default)]
+    message: Option<String>,
+    #[serde(default)]
+    field_paths: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+struct ConnectionTestResult {
+    #[serde(default)]
+    test_id: Option<String>,
+    #[serde(default)]
+    steps: Vec<ConnectionTestStepResult>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct UserMailPreferences {
+    reading: Value,
+    compose: Value,
+    notifications: Value,
+    sync_defaults: Value,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct MailIdentity {
+    identity_id: String,
+    account_id: String,
+    kind: String,
+    display_name: String,
+    email_address: String,
+    #[serde(default)]
+    reply_to: Option<String>,
+    #[serde(default)]
+    signature_id: Option<String>,
+    enabled: bool,
+    is_default_for_account: bool,
+    is_global_default: bool,
+    verification_state: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct MailSignature {
+    signature_id: String,
+    account_id: String,
+    #[serde(default)]
+    identity_id: Option<String>,
+    label: String,
+    #[serde(default)]
+    body_html: Option<String>,
+    #[serde(default)]
+    body_text: Option<String>,
+    enabled: bool,
+    use_for_new: bool,
+    use_for_replies: bool,
+    use_for_forwards: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+struct LegacySettings {
+    #[serde(default)]
+    ui_schemas: Value,
+    #[serde(default)]
+    settings: Value,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct GetProviderCapabilitiesRequest {
+    context: RequestContext,
+    #[serde(default)]
+    provider_ids: Vec<String>,
+}
+
+impl HasContext for GetProviderCapabilitiesRequest {
+    fn context(&self) -> &RequestContext { &self.context }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct ValidateAccountSetupRequest {
+    context: RequestContext,
+    account: UserMailAccountSetup,
+    #[serde(default)]
+    admin_policy_snapshot: Option<ProviderCapabilities>,
+    #[serde(default)]
+    existing_account_snapshot: Option<UserMailAccountSetup>,
+}
+
+impl HasContext for ValidateAccountSetupRequest {
+    fn context(&self) -> &RequestContext { &self.context }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct PlanConnectionTestRequest {
+    context: RequestContext,
+    account: UserMailAccountSetup,
+    test_scope: String,
+    #[serde(default)]
+    admin_policy_snapshot: Option<ProviderCapabilities>,
+}
+
+impl HasContext for PlanConnectionTestRequest {
+    fn context(&self) -> &RequestContext { &self.context }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct CompleteAccountSetupRequest {
+    context: RequestContext,
+    account: UserMailAccountSetup,
+    #[serde(default)]
+    connection_test_result: Option<ConnectionTestResult>,
+    #[serde(default)]
+    make_default: bool,
+    #[serde(default)]
+    save_mode: Option<String>,
+}
+
+impl HasContext for CompleteAccountSetupRequest {
+    fn context(&self) -> &RequestContext { &self.context }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct BeginOAuthAccountSetupRequest {
+    context: RequestContext,
+    provider: String,
+    email_address: String,
+    #[serde(default)]
+    account_label: Option<String>,
+    #[serde(default)]
+    requested_scopes: Vec<String>,
+    #[serde(default)]
+    redirect_route: Option<String>,
+}
+
+impl HasContext for BeginOAuthAccountSetupRequest {
+    fn context(&self) -> &RequestContext { &self.context }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct CompleteOAuthAccountSetupRequest {
+    context: RequestContext,
+    provider: String,
+    authorization_ref: String,
+    oauth_connection_ref: String,
+    #[serde(default)]
+    account: Option<UserMailAccountSetup>,
+    #[serde(default)]
+    connection_test_result: Option<ConnectionTestResult>,
+}
+
+impl HasContext for CompleteOAuthAccountSetupRequest {
+    fn context(&self) -> &RequestContext { &self.context }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct DisconnectOAuthAccountRequest {
+    context: RequestContext,
+    account_id: String,
+    #[serde(default)]
+    oauth_connection_ref: Option<String>,
+    #[serde(default)]
+    disable_account: bool,
+}
+
+impl HasContext for DisconnectOAuthAccountRequest {
+    fn context(&self) -> &RequestContext { &self.context }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct RemoveAccountRequest {
+    context: RequestContext,
+    account_id: String,
+    remove_local_cache: bool,
+    cancel_scheduled_sends: bool,
+    #[serde(default)]
+    delete_drafts: bool,
+    #[serde(default)]
+    revision: Option<String>,
+}
+
+impl HasContext for RemoveAccountRequest {
+    fn context(&self) -> &RequestContext { &self.context }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+struct IdentitySnapshot {
+    #[serde(default)]
+    identities: Vec<MailIdentity>,
+    #[serde(default)]
+    signatures: Vec<MailSignature>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct ListIdentitiesRequest {
+    context: RequestContext,
+    #[serde(default)]
+    account_id: Option<String>,
+    #[serde(default)]
+    snapshot: Option<IdentitySnapshot>,
+}
+
+impl HasContext for ListIdentitiesRequest {
+    fn context(&self) -> &RequestContext { &self.context }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct SaveIdentityRequest {
+    context: RequestContext,
+    identity: MailIdentity,
+    #[serde(default)]
+    revision: Option<String>,
+}
+
+impl HasContext for SaveIdentityRequest {
+    fn context(&self) -> &RequestContext { &self.context }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct DeleteIdentityRequest {
+    context: RequestContext,
+    identity_id: String,
+    #[serde(default)]
+    account_id: Option<String>,
+    #[serde(default)]
+    force: bool,
+}
+
+impl HasContext for DeleteIdentityRequest {
+    fn context(&self) -> &RequestContext { &self.context }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct SaveSignatureRequest {
+    context: RequestContext,
+    signature: MailSignature,
+    #[serde(default)]
+    revision: Option<String>,
+}
+
+impl HasContext for SaveSignatureRequest {
+    fn context(&self) -> &RequestContext { &self.context }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct DeleteSignatureRequest {
+    context: RequestContext,
+    signature_id: String,
+    #[serde(default)]
+    account_id: Option<String>,
+    #[serde(default)]
+    force: bool,
+}
+
+impl HasContext for DeleteSignatureRequest {
+    fn context(&self) -> &RequestContext { &self.context }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct GetUserPreferencesRequest {
+    context: RequestContext,
+    #[serde(default)]
+    snapshot: Option<UserMailPreferences>,
+    #[serde(default)]
+    include_defaults: bool,
+}
+
+impl HasContext for GetUserPreferencesRequest {
+    fn context(&self) -> &RequestContext { &self.context }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct SaveUserPreferencesRequest {
+    context: RequestContext,
+    preferences: UserMailPreferences,
+    #[serde(default)]
+    revision: Option<String>,
+}
+
+impl HasContext for SaveUserPreferencesRequest {
+    fn context(&self) -> &RequestContext { &self.context }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct InspectLegacySettingsRequest {
+    context: RequestContext,
+    #[serde(default)]
+    legacy_settings: Option<LegacySettings>,
+}
+
+impl HasContext for InspectLegacySettingsRequest {
+    fn context(&self) -> &RequestContext { &self.context }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct MigrateLegacySettingsRequest {
+    context: RequestContext,
+    legacy_settings: LegacySettings,
+    #[serde(default)]
+    migration_options: Value,
+    #[serde(default)]
+    dry_run: bool,
+}
+
+impl HasContext for MigrateLegacySettingsRequest {
+    fn context(&self) -> &RequestContext { &self.context }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -907,6 +1338,131 @@ struct SchedulePlan {
     undo_window_seconds: u32,
 }
 
+#[derive(Serialize)]
+struct FieldIssue {
+    field_path: String,
+    code: &'static str,
+    message: String,
+}
+
+#[derive(Serialize)]
+struct AccountValidationData {
+    valid: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    normalized_account: Option<UserMailAccountSetup>,
+    field_errors: Vec<FieldIssue>,
+    warnings: Vec<WarningMessage>,
+    next_required_action: &'static str,
+}
+
+#[derive(Serialize)]
+struct ConnectionTestPlanData {
+    account_id: String,
+    test_id: String,
+    steps: Vec<String>,
+    requires_host_execution: bool,
+}
+
+#[derive(Serialize)]
+struct AccountSetupCompletionData {
+    account: MailAccountSummary,
+    status: String,
+    requires_reconnect: bool,
+    requires_sync: bool,
+}
+
+#[derive(Serialize)]
+struct OAuthBeginData {
+    provider: String,
+    authorization_ref_present: bool,
+    status: &'static str,
+    next_route: String,
+}
+
+#[derive(Serialize)]
+struct OAuthCompletionData {
+    account: MailAccountSummary,
+    identity: MailIdentity,
+    requires_sync: bool,
+}
+
+#[derive(Serialize)]
+struct OAuthDisconnectData {
+    account_id: String,
+    credential_state: &'static str,
+    disabled: bool,
+}
+
+#[derive(Serialize)]
+struct AccountRemovalData {
+    account_id: String,
+    status: &'static str,
+    cleanup_planned: Vec<&'static str>,
+}
+
+#[derive(Serialize)]
+struct IdentityListData {
+    identities: Vec<MailIdentity>,
+    signatures: Vec<MailSignature>,
+    needs_host_refresh: bool,
+}
+
+#[derive(Serialize)]
+struct IdentityMutationData {
+    identity: MailIdentity,
+    verification_required: bool,
+}
+
+#[derive(Serialize)]
+struct IdentityDeleteData {
+    identity_id: String,
+    removed: bool,
+    default_reassigned_to: Option<String>,
+}
+
+#[derive(Serialize)]
+struct SignatureMutationData {
+    signature: MailSignature,
+}
+
+#[derive(Serialize)]
+struct SignatureDeleteData {
+    signature_id: String,
+    removed: bool,
+    identity_updates: Vec<Value>,
+}
+
+#[derive(Serialize)]
+struct UserPreferencesData {
+    preferences: UserMailPreferences,
+    defaults_applied: bool,
+    needs_host_refresh: bool,
+}
+
+#[derive(Serialize)]
+struct UserPreferencesMutationData {
+    preferences: UserMailPreferences,
+    changed_groups: Vec<&'static str>,
+}
+
+#[derive(Serialize)]
+struct LegacyInspectionData {
+    accounts_detected: usize,
+    preferences_detected: Vec<&'static str>,
+    credential_risks: Vec<&'static str>,
+    migration_preview: Value,
+    requires_user_reconnect: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct LegacyMigrationData {
+    migrated_accounts: Vec<Value>,
+    migrated_preferences: Value,
+    migration_map: Value,
+    requires_reconnect: Vec<String>,
+    obsolete_keys_removed: Vec<&'static str>,
+}
+
 fn default_true() -> bool {
     true
 }
@@ -968,17 +1524,111 @@ fn ensure_non_empty(field: &str, value: &str) -> Result<(), ErrorResponse> {
     Ok(())
 }
 
+fn contains_ascii_control(value: &str) -> bool {
+    value.chars().any(|character| character.is_ascii_control())
+}
+
+fn ensure_host_string(field: &str, value: &str, max_len: usize) -> Result<(), ErrorResponse> {
+    ensure_non_empty(field, value)?;
+    let trimmed = value.trim();
+    if trimmed.len() != value.len() || trimmed.len() > max_len || contains_ascii_control(trimmed) {
+        return Err(ErrorResponse::new(
+            "InvalidInput",
+            format!("{field} contains unsupported characters or exceeds {max_len} characters"),
+        ));
+    }
+    Ok(())
+}
+
+fn is_safe_ref_char(character: char) -> bool {
+    character.is_ascii_alphanumeric() || matches!(character, '_' | '-' | '.' | '/' | ':' | '@')
+}
+
+fn validate_host_id(field: &str, value: &str) -> Result<(), ErrorResponse> {
+    ensure_host_string(field, value, MAX_HOST_ID_LENGTH)?;
+    if !value.chars().all(is_safe_ref_char) {
+        return Err(ErrorResponse::new(
+            "InvalidInput",
+            format!("{field} contains unsupported characters"),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_optional_host_id(field: &str, value: &Option<String>) -> Result<(), ErrorResponse> {
+    if let Some(value) = value {
+        validate_host_id(field, value)?;
+    }
+    Ok(())
+}
+
+fn is_opaque_secret_ref(value: &str) -> bool {
+    const PREFIXES: [&str; 4] = [
+        "host-secure-field:",
+        "host-secret:",
+        "oauth-connection:",
+        "authorization:",
+    ];
+    PREFIXES.iter().any(|prefix| {
+        value.strip_prefix(prefix).is_some_and(|id| {
+            !id.is_empty()
+                && id.len() <= MAX_HOST_ID_LENGTH
+                && id.chars().all(is_safe_ref_char)
+                && !contains_ascii_control(id)
+        })
+    })
+}
+
+fn validate_secret_ref(field: &str, value: &Option<String>) -> Result<(), ErrorResponse> {
+    if let Some(value) = value {
+        ensure_host_string(field, value, MAX_HOST_ID_LENGTH + 32)?;
+        if !is_opaque_secret_ref(value) {
+            return Err(ErrorResponse::new(
+                "InvalidInput",
+                format!("{field} must be an opaque host-managed reference"),
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn validate_email(email: &str) -> Result<(), ErrorResponse> {
-    if email.len() > 320
-        || !email.contains('@')
-        || email.starts_with('@')
-        || email.ends_with('@')
-        || email.contains(' ')
-    {
+    let trimmed = email.trim();
+    let invalid = trimmed.len() != email.len()
+        || trimmed.len() > 320
+        || trimmed.chars().any(|character| character.is_ascii_control() || character.is_whitespace())
+        || trimmed.matches('@').count() != 1;
+    if invalid {
         return Err(ErrorResponse::new(
             "InvalidRecipient",
-            format!("Invalid email address: {email}"),
+            "Invalid email address",
         ));
+    }
+
+    let (local, domain) = trimmed.split_once('@').unwrap_or(("", ""));
+    let local_ok = !local.is_empty()
+        && local.len() <= 64
+        && !local.starts_with('.')
+        && !local.ends_with('.')
+        && !local.contains("..")
+        && local.chars().all(|character| {
+            character.is_ascii_alphanumeric()
+                || matches!(character, '!' | '#' | '$' | '%' | '&' | '\'' | '*' | '+' | '-' | '/' | '=' | '?' | '^' | '_' | '`' | '{' | '|' | '}' | '~' | '.')
+        });
+    let domain_ok = !domain.is_empty()
+        && domain.len() <= 255
+        && domain.contains('.')
+        && !domain.starts_with('.')
+        && !domain.ends_with('.')
+        && domain.split('.').all(|label| {
+            !label.is_empty()
+                && label.len() <= 63
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+                && label.chars().all(|character| character.is_ascii_alphanumeric() || character == '-')
+        });
+    if !local_ok || !domain_ok {
+        return Err(ErrorResponse::new("InvalidRecipient", "Invalid email address"));
     }
 
     Ok(())
@@ -1013,7 +1663,10 @@ fn validate_sort(sort: Option<SortSpec>) -> Result<SortSpec, ErrorResponse> {
         field: "received_at".to_string(),
         direction: "desc".to_string(),
     });
-    ensure_non_empty("sort.field", &sort.field)?;
+    match sort.field.as_str() {
+        "received_at" | "sent_at" | "subject" | "from" | "importance" | "is_read" | "is_flagged" => {}
+        _ => return Err(ErrorResponse::new("InvalidInput", "sort.field is not supported")),
+    }
     match sort.direction.as_str() {
         "asc" | "desc" => Ok(sort),
         _ => Err(ErrorResponse::new(
@@ -1031,9 +1684,53 @@ fn validate_message_ids(ids: &[String]) -> Result<(), ErrorResponse> {
         ));
     }
     for id in ids {
-        ensure_non_empty("email_ids[]", id)?;
+        validate_host_id("email_ids[]", id)?;
     }
     Ok(())
+}
+
+fn validate_search_text(field: &str, value: &Option<String>) -> Result<(), ErrorResponse> {
+    if let Some(value) = value {
+        if value.len() > MAX_FILTER_TEXT_LENGTH || contains_ascii_control(value) {
+            return Err(ErrorResponse::new(
+                "InvalidInput",
+                format!("{field} exceeds limits or contains control characters"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_id_list(field: &str, values: &Option<Vec<String>>) -> Result<(), ErrorResponse> {
+    if let Some(values) = values {
+        if values.len() > MAX_FILTER_IDS {
+            return Err(ErrorResponse::new(
+                "InvalidInput",
+                format!("{field} must contain at most {MAX_FILTER_IDS} items"),
+            ));
+        }
+        for value in values {
+            validate_host_id(field, value)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_filters(filters: &SearchFilters) -> Result<(), ErrorResponse> {
+    validate_search_text("filters.from", &filters.from)?;
+    validate_search_text("filters.to", &filters.to)?;
+    validate_search_text("filters.subject_contains", &filters.subject_contains)?;
+    validate_search_text("filters.body_contains", &filters.body_contains)?;
+    validate_id_list("filters.account_ids[]", &filters.account_ids)?;
+    validate_id_list("filters.mailbox_ids[]", &filters.mailbox_ids)?;
+    if let Some(importance) = &filters.importance {
+        validate_importance(importance)?;
+    }
+    Ok(())
+}
+
+fn validate_query(query: &str) -> Result<(), ErrorResponse> {
+    ensure_host_string("query", query, MAX_SEARCH_QUERY_LENGTH)
 }
 
 fn validate_importance(importance: &str) -> Result<(), ErrorResponse> {
@@ -1139,11 +1836,12 @@ fn host_effect(
     intent: &'static str,
     payload: Value,
 ) -> HostEffect {
+    let seed = serde_json::to_string(&payload).unwrap_or_else(|_| effect.to_string());
     HostEffect {
         effect,
         intent,
         payload,
-        idempotency_key: context.idempotency_key(operation, effect),
+        idempotency_key: context.idempotency_key(operation, effect, &seed),
     }
 }
 
@@ -1170,7 +1868,7 @@ fn hash_text(input: &str) -> String {
 fn suggested_draft_id(context: &RequestContext, draft: &DraftDocument) -> String {
     draft.draft_id.clone().unwrap_or_else(|| {
         let seed = serde_json::to_string(draft).unwrap_or_else(|_| draft.account_id.clone());
-        format!("draft_{}", context.idempotency_key("draft", &seed).replace(':', "_"))
+        format!("draft_{}", context.idempotency_key("draft", EFFECT_MAIL_STORE_WRITE, &seed).replace(':', "_"))
     })
 }
 
@@ -1253,7 +1951,7 @@ fn handle_list_accounts(
 fn handle_get_account_status(
     request: GetAccountStatusRequest,
 ) -> Result<OperationResponse<MailAccountStatus>, ErrorResponse> {
-    ensure_non_empty("account_id", &request.account_id)?;
+    validate_host_id("account_id", &request.account_id)?;
     let data = request.snapshot.clone().unwrap_or(MailAccountStatus {
         account_id: request.account_id.clone(),
         connection_state: "unknown".to_string(),
@@ -1289,7 +1987,7 @@ fn handle_list_mailboxes(
     request: ListMailboxesRequest,
 ) -> Result<OperationResponse<QueryCollection<Mailbox>>, ErrorResponse> {
     if let Some(account_id) = &request.account_id {
-        ensure_non_empty("account_id", account_id)?;
+        validate_host_id("account_id", account_id)?;
     }
 
     let data = build_query_collection(request.snapshot.clone(), request.refresh);
@@ -1321,14 +2019,13 @@ fn handle_read_emails(
     request: ReadEmailsRequest,
 ) -> Result<OperationResponse<ReadEmailsData>, ErrorResponse> {
     ensure_non_empty("mailbox_id", &request.mailbox_id)?;
+    validate_host_id("mailbox_id", &request.mailbox_id)?;
     if let Some(account_id) = &request.account_id {
-        ensure_non_empty("account_id", account_id)?;
+        validate_host_id("account_id", account_id)?;
     }
     let page = validate_pagination(request.pagination.clone())?;
     let sort = validate_sort(request.sort.clone())?;
-    if let Some(importance) = &request.filters.importance {
-        validate_importance(importance)?;
-    }
+    validate_filters(&request.filters)?;
 
     let data = ReadEmailsData {
         mailbox_id: request.mailbox_id.clone(),
@@ -1378,11 +2075,9 @@ fn handle_read_emails(
 fn handle_search_emails(
     request: SearchEmailsRequest,
 ) -> Result<OperationResponse<SearchEmailsData>, ErrorResponse> {
-    ensure_non_empty("query", &request.query)?;
+    validate_query(&request.query)?;
     let page = validate_pagination(request.pagination.clone())?;
-    if let Some(importance) = &request.filters.importance {
-        validate_importance(importance)?;
-    }
+    validate_filters(&request.filters)?;
     let data = SearchEmailsData {
         query: request.query.clone(),
         page,
@@ -1423,9 +2118,9 @@ fn handle_search_emails(
 fn handle_get_email(
     request: GetEmailRequest,
 ) -> Result<OperationResponse<EmailMessage>, ErrorResponse> {
-    ensure_non_empty("email_id", &request.email_id)?;
+    validate_host_id("email_id", &request.email_id)?;
     if let Some(account_id) = &request.account_id {
-        ensure_non_empty("account_id", account_id)?;
+        validate_host_id("account_id", account_id)?;
     }
 
     let data = request.snapshot.clone().unwrap_or(EmailMessage {
@@ -1495,9 +2190,9 @@ fn handle_get_email(
 fn handle_get_thread(
     request: GetThreadRequest,
 ) -> Result<OperationResponse<ThreadData>, ErrorResponse> {
-    ensure_non_empty("thread_id", &request.thread_id)?;
+    validate_host_id("thread_id", &request.thread_id)?;
     if let Some(account_id) = &request.account_id {
-        ensure_non_empty("account_id", account_id)?;
+        validate_host_id("account_id", account_id)?;
     }
     let data = ThreadData {
         thread_id: request.thread_id.clone(),
@@ -1668,7 +2363,7 @@ fn handle_update_draft(
 fn handle_discard_draft(
     request: DiscardDraftRequest,
 ) -> Result<OperationResponse<MutationAck>, ErrorResponse> {
-    ensure_non_empty("draft_id", &request.draft_id)?;
+    validate_host_id("draft_id", &request.draft_id)?;
     let data = MutationAck {
         mutation: "discard_draft",
         resource_ids: vec![request.draft_id.clone()],
@@ -1698,8 +2393,8 @@ fn handle_discard_draft(
 fn handle_send_email(
     request: SendEmailRequest,
 ) -> Result<OperationResponse<SendPlan>, ErrorResponse> {
-    ensure_non_empty("draft_id", &request.draft_id)?;
-    ensure_non_empty("account_id", &request.account_id)?;
+    validate_host_id("draft_id", &request.draft_id)?;
+    validate_host_id("account_id", &request.account_id)?;
     let data = SendPlan {
         draft_id: request.draft_id.clone(),
         account_id: request.account_id.clone(),
@@ -1756,8 +2451,8 @@ fn handle_send_email(
 fn handle_reply_email(
     request: ReplyEmailRequest,
 ) -> Result<OperationResponse<ReplyPlan>, ErrorResponse> {
-    ensure_non_empty("email_id", &request.email_id)?;
-    ensure_non_empty("account_id", &request.account_id)?;
+    validate_host_id("email_id", &request.email_id)?;
+    validate_host_id("account_id", &request.account_id)?;
     validate_compose_body("reply_email", &request.body_html, &request.body_text)?;
 
     let data = ReplyPlan {
@@ -1812,8 +2507,8 @@ fn handle_reply_email(
 fn handle_forward_email(
     request: ForwardEmailRequest,
 ) -> Result<OperationResponse<ForwardPlan>, ErrorResponse> {
-    ensure_non_empty("email_id", &request.email_id)?;
-    ensure_non_empty("account_id", &request.account_id)?;
+    validate_host_id("email_id", &request.email_id)?;
+    validate_host_id("account_id", &request.account_id)?;
     validate_addresses("to", &request.to)?;
     validate_addresses("cc", &request.cc)?;
     validate_addresses("bcc", &request.bcc)?;
@@ -1879,7 +2574,7 @@ fn handle_move_email(
     request: MoveEmailRequest,
 ) -> Result<OperationResponse<MutationAck>, ErrorResponse> {
     validate_message_ids(&request.email_ids)?;
-    ensure_non_empty("destination_mailbox_id", &request.destination_mailbox_id)?;
+    validate_host_id("destination_mailbox_id", &request.destination_mailbox_id)?;
     let data = MutationAck {
         mutation: "move_email",
         resource_ids: request.email_ids.clone(),
@@ -1981,8 +2676,8 @@ fn handle_archive_email(
 fn handle_create_folder(
     request: CreateFolderRequest,
 ) -> Result<OperationResponse<FolderMutationData>, ErrorResponse> {
-    ensure_non_empty("account_id", &request.account_id)?;
-    ensure_non_empty("name", &request.name)?;
+    validate_host_id("account_id", &request.account_id)?;
+    ensure_host_string("name", &request.name, MAX_FOLDER_NAME_LENGTH)?;
     if request.name.len() > MAX_FOLDER_NAME_LENGTH {
         return Err(ErrorResponse::new(
             "InvalidInput",
@@ -2025,9 +2720,9 @@ fn handle_create_folder(
 fn handle_rename_folder(
     request: RenameFolderRequest,
 ) -> Result<OperationResponse<FolderMutationData>, ErrorResponse> {
-    ensure_non_empty("account_id", &request.account_id)?;
-    ensure_non_empty("mailbox_id", &request.mailbox_id)?;
-    ensure_non_empty("new_name", &request.new_name)?;
+    validate_host_id("account_id", &request.account_id)?;
+    validate_host_id("mailbox_id", &request.mailbox_id)?;
+    ensure_host_string("new_name", &request.new_name, MAX_FOLDER_NAME_LENGTH)?;
     if request.new_name.len() > MAX_FOLDER_NAME_LENGTH {
         return Err(ErrorResponse::new(
             "InvalidInput",
@@ -2064,8 +2759,8 @@ fn handle_rename_folder(
 fn handle_delete_folder(
     request: DeleteFolderRequest,
 ) -> Result<OperationResponse<MutationAck>, ErrorResponse> {
-    ensure_non_empty("account_id", &request.account_id)?;
-    ensure_non_empty("mailbox_id", &request.mailbox_id)?;
+    validate_host_id("account_id", &request.account_id)?;
+    validate_host_id("mailbox_id", &request.mailbox_id)?;
     let data = MutationAck {
         mutation: "delete_folder",
         resource_ids: vec![request.mailbox_id.clone()],
@@ -2097,7 +2792,7 @@ fn handle_get_unread_count(
     request: GetUnreadCountRequest,
 ) -> Result<OperationResponse<UnreadCountData>, ErrorResponse> {
     if let Some(account_id) = &request.account_id {
-        ensure_non_empty("account_id", account_id)?;
+        validate_host_id("account_id", account_id)?;
     }
     let data = UnreadCountData {
         counts: request.snapshot.clone().unwrap_or_default(),
@@ -2129,20 +2824,8 @@ fn handle_get_unread_count(
 fn handle_create_rule(
     request: CreateRuleRequest,
 ) -> Result<OperationResponse<MailRule>, ErrorResponse> {
-    ensure_non_empty("account_id", &request.account_id)?;
-    ensure_non_empty("rule.name", &request.rule.name)?;
-    if request.rule.name.len() > MAX_RULE_NAME_LENGTH {
-        return Err(ErrorResponse::new(
-            "InvalidInput",
-            format!("Rule names must be at most {MAX_RULE_NAME_LENGTH} characters"),
-        ));
-    }
-    if request.rule.conditions.is_empty() || request.rule.actions.is_empty() {
-        return Err(ErrorResponse::new(
-            "InvalidInput",
-            "Rules require at least one condition and one action",
-        ));
-    }
+    validate_host_id("account_id", &request.account_id)?;
+    validate_rule(&request.rule)?;
     let host_effects = vec![host_effect(
         &request.context,
         "create_rule",
@@ -2167,7 +2850,7 @@ fn handle_create_rule(
 fn handle_list_rules(
     request: ListRulesRequest,
 ) -> Result<OperationResponse<QueryCollection<MailRule>>, ErrorResponse> {
-    ensure_non_empty("account_id", &request.account_id)?;
+    validate_host_id("account_id", &request.account_id)?;
     let data = build_query_collection(request.snapshot.clone(), request.refresh);
     let mut host_effects = Vec::new();
     if request.refresh || request.snapshot.is_none() {
@@ -2195,8 +2878,8 @@ fn handle_list_rules(
 fn handle_delete_rule(
     request: DeleteRuleRequest,
 ) -> Result<OperationResponse<MutationAck>, ErrorResponse> {
-    ensure_non_empty("account_id", &request.account_id)?;
-    ensure_non_empty("rule_id", &request.rule_id)?;
+    validate_host_id("account_id", &request.account_id)?;
+    validate_host_id("rule_id", &request.rule_id)?;
     let data = MutationAck {
         mutation: "delete_rule",
         resource_ids: vec![request.rule_id.clone()],
@@ -2226,8 +2909,8 @@ fn handle_delete_rule(
 fn handle_schedule_send(
     request: ScheduleSendRequest,
 ) -> Result<OperationResponse<SchedulePlan>, ErrorResponse> {
-    ensure_non_empty("draft_id", &request.draft_id)?;
-    ensure_non_empty("account_id", &request.account_id)?;
+    validate_host_id("draft_id", &request.draft_id)?;
+    validate_host_id("account_id", &request.account_id)?;
     let job_id = format!(
         "job_{}",
         hash_text(&format!("{}:{}", request.draft_id, request.scheduled_for))
@@ -2281,8 +2964,9 @@ fn handle_schedule_send(
 fn handle_cancel_scheduled_send(
     request: CancelScheduledSendRequest,
 ) -> Result<OperationResponse<MutationAck>, ErrorResponse> {
-    ensure_non_empty("job_id", &request.job_id)?;
-    ensure_non_empty("account_id", &request.account_id)?;
+    validate_host_id("job_id", &request.job_id)?;
+    validate_host_id("account_id", &request.account_id)?;
+    validate_optional_host_id("draft_id", &request.draft_id)?;
     let data = MutationAck {
         mutation: "cancel_scheduled_send",
         resource_ids: vec![request.job_id.clone()],
@@ -2321,6 +3005,683 @@ fn handle_cancel_scheduled_send(
         host_effects,
         warnings: Vec::new(),
     })
+}
+
+fn default_preferences() -> UserMailPreferences {
+    UserMailPreferences {
+        reading: json!({
+            "preview_pane": "right",
+            "thread_view": true,
+            "focused_inbox": true,
+            "page_size": DEFAULT_PAGE_SIZE,
+            "list_density": "comfortable",
+            "remote_content": "ask"
+        }),
+        compose: json!({
+            "undo_send_delay_seconds": 10,
+            "default_format": "html",
+            "default_sender_strategy": "last_used",
+            "reply_quote_mode": "collapsed",
+            "forward_attachments_default": false
+        }),
+        notifications: json!({ "enabled": true, "per_account": {} }),
+        sync_defaults: json!({
+            "interval_minutes": 5,
+            "initial_range": "30_days",
+            "download_attachments": "metadata_only",
+            "offline_cache": false
+        }),
+    }
+}
+
+fn default_provider_capabilities() -> ProviderCapabilities {
+    ProviderCapabilities {
+        providers: vec![
+            json!({ "provider": "google_oauth", "label": "Google Workspace", "auth_method": "oauth2", "status": "host_connector" }),
+            json!({ "provider": "microsoft_oauth", "label": "Microsoft 365", "auth_method": "oauth2", "status": "host_connector" }),
+        ],
+        manual_imap_smtp: json!({
+            "enabled": true,
+            "security_modes": ["ssl_tls", "starttls"],
+            "default_imap_port": 993,
+            "default_smtp_port": 587,
+            "allow_receive_only": true
+        }),
+        policy: json!({
+            "allow_manual_imap_smtp": true,
+            "allowed_oauth_providers": ["google_oauth", "microsoft_oauth"],
+            "allow_insecure_transport": false,
+            "min_sync_interval_minutes": 5,
+            "max_recipients": MAX_RECIPIENTS,
+            "attachment_max_bytes": 25_000_000,
+            "connection_test_modes": ["all", "incoming", "outgoing", "folder_mapping"]
+        }),
+        oauth_placeholders: vec!["google_oauth".to_string(), "microsoft_oauth".to_string()],
+    }
+}
+
+fn normalize_account(mut account: UserMailAccountSetup) -> UserMailAccountSetup {
+    if account.provider.trim().is_empty() {
+        account.provider = "manual_imap_smtp".to_string();
+    }
+    if account.auth_method.trim().is_empty() {
+        account.auth_method = if account.provider.ends_with("oauth") { "oauth2" } else { "app_password" }.to_string();
+    }
+    if account.desired_status.is_none() {
+        account.desired_status = Some("active".to_string());
+    }
+    if let Some(incoming) = &mut account.incoming {
+        if incoming.port.is_none() {
+            incoming.port = Some(993);
+        }
+        if incoming.security.is_none() {
+            incoming.security = Some("ssl_tls".to_string());
+        }
+    }
+    if let Some(outgoing) = &mut account.outgoing {
+        if outgoing.port.is_none() {
+            outgoing.port = Some(587);
+        }
+        if outgoing.security.is_none() {
+            outgoing.security = Some("starttls".to_string());
+        }
+    }
+    account
+}
+
+fn push_field_error(errors: &mut Vec<FieldIssue>, field_path: &str, message: impl Into<String>) {
+    errors.push(FieldIssue {
+        field_path: field_path.to_string(),
+        code: "InvalidInput",
+        message: message.into(),
+    });
+}
+
+fn push_validation_result(errors: &mut Vec<FieldIssue>, field_path: &str, result: Result<(), ErrorResponse>) {
+    if let Err(error) = result {
+        push_field_error(errors, field_path, error.message);
+    }
+}
+
+fn is_valid_host_name(value: &str) -> bool {
+    value.len() <= 255
+        && value.split('.').all(|label| {
+            !label.is_empty()
+                && label.len() <= 63
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+                && label.chars().all(|character| character.is_ascii_alphanumeric() || character == '-')
+        })
+}
+
+fn redact_secret_refs(account: &mut UserMailAccountSetup) {
+    if let Some(incoming) = &mut account.incoming {
+        incoming.secret_input_ref = None;
+        incoming.secret_ref = None;
+    }
+    if let Some(outgoing) = &mut account.outgoing {
+        outgoing.secret_input_ref = None;
+        outgoing.secret_ref = None;
+    }
+    if let Some(oauth) = &mut account.oauth {
+        oauth.connection_ref = None;
+        oauth.redirect_state_ref = None;
+    }
+}
+
+fn has_secret_ref(config: &ServerConfig) -> bool {
+    config.secret_input_ref.as_ref().is_some_and(|value| !value.trim().is_empty())
+        || config.secret_ref.as_ref().is_some_and(|value| !value.trim().is_empty())
+}
+
+fn validate_server_config(errors: &mut Vec<FieldIssue>, field: &str, expected_protocol: &str, config: &ServerConfig) {
+    if config.protocol != expected_protocol {
+        push_field_error(errors, &format!("{field}.protocol"), format!("{field}.protocol must be {expected_protocol}"));
+    }
+    if config.host.trim().is_empty() || !is_valid_host_name(&config.host) || contains_ascii_control(&config.host) {
+        push_field_error(errors, &format!("{field}.host"), format!("{field}.host must be a valid host name"));
+    }
+    if config.username.trim().is_empty() || config.username.len() > 320 || contains_ascii_control(&config.username) || config.username.chars().any(char::is_whitespace) {
+        push_field_error(errors, &format!("{field}.username"), format!("{field}.username contains unsupported characters"));
+    }
+    match config.security.as_deref().unwrap_or(if expected_protocol == "imap" { "ssl_tls" } else { "starttls" }) {
+        "ssl_tls" | "starttls" => {}
+        "none" => push_field_error(errors, &format!("{field}.security"), "security none requires admin policy and is disabled by default"),
+        _ => push_field_error(errors, &format!("{field}.security"), "security must be ssl_tls or starttls"),
+    }
+    if matches!(config.port, Some(0)) {
+        push_field_error(errors, &format!("{field}.port"), "port must be greater than zero");
+    }
+    push_validation_result(errors, &format!("{field}.secret_input_ref"), validate_secret_ref(&format!("{field}.secret_input_ref"), &config.secret_input_ref));
+    push_validation_result(errors, &format!("{field}.secret_ref"), validate_secret_ref(&format!("{field}.secret_ref"), &config.secret_ref));
+    if let Some(path_prefix) = &config.path_prefix {
+        push_validation_result(errors, &format!("{field}.path_prefix"), ensure_host_string(&format!("{field}.path_prefix"), path_prefix, 128));
+    }
+}
+
+fn validate_rule_value(field_path: &str, value: &Value, allow_bool: bool) -> Result<(), ErrorResponse> {
+    match value {
+        Value::String(value) => ensure_host_string(field_path, value, MAX_FILTER_TEXT_LENGTH),
+        Value::Bool(_) if allow_bool => Ok(()),
+        Value::Array(values) if values.len() <= MAX_FILTER_IDS => {
+            for item in values {
+                let value = item.as_str().ok_or_else(|| ErrorResponse::new("InvalidInput", format!("{field_path} array items must be strings")))?;
+                ensure_host_string(field_path, value, MAX_FILTER_TEXT_LENGTH)?;
+            }
+            Ok(())
+        }
+        _ => Err(ErrorResponse::new("InvalidInput", format!("{field_path} has unsupported value shape"))),
+    }
+}
+
+fn validate_rule(rule: &MailRule) -> Result<(), ErrorResponse> {
+    validate_host_id("rule.rule_id", &rule.rule_id)?;
+    ensure_host_string("rule.name", &rule.name, MAX_RULE_NAME_LENGTH)?;
+    if rule.conditions.is_empty() || rule.conditions.len() > MAX_RULE_CONDITIONS || rule.actions.is_empty() || rule.actions.len() > MAX_RULE_ACTIONS {
+        return Err(ErrorResponse::new("InvalidInput", "Rules require bounded non-empty conditions and actions"));
+    }
+    for condition in &rule.conditions {
+        match condition.field.as_str() {
+            "from" | "to" | "cc" | "subject" | "body" | "importance" | "account_id" | "mailbox_id" | "has_attachments" | "unread" | "flagged" => {}
+            _ => return Err(ErrorResponse::new("InvalidInput", "rule.conditions[].field is not supported")),
+        }
+        match condition.operator.as_str() {
+            "equals" | "contains" | "starts_with" | "ends_with" | "exists" | "not_exists" => {}
+            _ => return Err(ErrorResponse::new("InvalidInput", "rule.conditions[].operator is not supported")),
+        }
+        let bool_field = matches!(condition.field.as_str(), "has_attachments" | "unread" | "flagged");
+        validate_rule_value("rule.conditions[].value", &condition.value, bool_field)?;
+    }
+    for action in &rule.actions {
+        match action.action_type.as_str() {
+            "move_to" | "copy_to" => {
+                let value = action.value.as_str().ok_or_else(|| ErrorResponse::new("InvalidInput", "folder rule actions require a mailbox id"))?;
+                validate_host_id("rule.actions[].value", value)?;
+            }
+            "categorize" => validate_rule_value("rule.actions[].value", &action.value, false)?,
+            "mark_read" | "mark_unread" | "flag" | "unflag" | "delete" | "archive" | "stop" => {
+                if !action.value.is_null() && action.value != json!(true) {
+                    return Err(ErrorResponse::new("InvalidInput", "rule action value is not supported"));
+                }
+            }
+            _ => return Err(ErrorResponse::new("InvalidInput", "rule.actions[].action_type is not supported")),
+        }
+    }
+    Ok(())
+}
+
+fn validate_account_fields(account: &UserMailAccountSetup) -> Vec<FieldIssue> {
+    let mut errors = Vec::new();
+    if account.account_label.trim().is_empty() {
+        push_field_error(&mut errors, "account.account_label", "account label must not be empty");
+    }
+    if account.display_name.trim().is_empty() {
+        push_field_error(&mut errors, "account.display_name", "display name must not be empty");
+    }
+    if validate_email(&account.email_address).is_err() {
+        push_field_error(&mut errors, "account.email_address", "email address is not valid");
+    }
+    if let Some(reply_to) = &account.reply_to {
+        if !reply_to.trim().is_empty() && validate_email(reply_to).is_err() {
+            push_field_error(&mut errors, "account.reply_to", "reply-to address is not valid");
+        }
+    }
+    match account.provider.as_str() {
+        "manual_imap_smtp" | "google_oauth" | "microsoft_oauth" => {}
+        value if !value.trim().is_empty() => {}
+        _ => push_field_error(&mut errors, "account.provider", "provider must not be empty"),
+    }
+    match account.auth_method.as_str() {
+        "password" | "app_password" | "oauth2" | "host_connector" => {}
+        _ => push_field_error(&mut errors, "account.auth_method", "auth_method must be password, app_password, oauth2, or host_connector"),
+    }
+
+    let desired_status = account.desired_status.as_deref().unwrap_or("active");
+    match desired_status {
+        "active" | "disabled" | "incomplete" | "receive_only" => {}
+        _ => push_field_error(&mut errors, "account.desired_status", "desired_status must be active, disabled, incomplete, or receive_only"),
+    }
+
+    if account.auth_method == "oauth2" {
+        match &account.oauth {
+            Some(oauth) => {
+                if oauth.provider.trim().is_empty() {
+                    push_field_error(&mut errors, "account.oauth.provider", "oauth provider must not be empty");
+                }
+                push_validation_result(&mut errors, "account.oauth.connection_ref", validate_secret_ref("account.oauth.connection_ref", &oauth.connection_ref));
+                push_validation_result(&mut errors, "account.oauth.redirect_state_ref", validate_secret_ref("account.oauth.redirect_state_ref", &oauth.redirect_state_ref));
+                if oauth.scopes.len() > 32 || oauth.scopes.iter().any(|scope| ensure_host_string("account.oauth.scopes[]", scope, 128).is_err()) {
+                    push_field_error(&mut errors, "account.oauth.scopes", "oauth scopes exceed limits or contain unsupported characters");
+                }
+            }
+            None => push_field_error(&mut errors, "account.oauth", "OAuth account setup requires oauth metadata"),
+        }
+    } else {
+        match &account.incoming {
+            Some(incoming) => validate_server_config(&mut errors, "account.incoming", "imap", incoming),
+            None => push_field_error(&mut errors, "account.incoming", "manual setup requires incoming IMAP settings"),
+        }
+        if desired_status != "receive_only" {
+            match &account.outgoing {
+                Some(outgoing) => validate_server_config(&mut errors, "account.outgoing", "smtp", outgoing),
+                None => push_field_error(&mut errors, "account.outgoing", "sending requires outgoing SMTP settings"),
+            }
+        }
+    }
+
+    if let Some(sync) = &account.sync {
+        if let Some(interval) = sync.interval_minutes {
+            if interval < 5 {
+                push_field_error(&mut errors, "account.sync.interval_minutes", "sync interval must be at least 5 minutes");
+            }
+        }
+    }
+
+    errors
+}
+
+fn next_account_action(account: &UserMailAccountSetup, valid: bool) -> &'static str {
+    if !valid {
+        return "enter_secret";
+    }
+    if account.auth_method == "oauth2" {
+        if account.oauth.as_ref().and_then(|oauth| oauth.connection_ref.as_ref()).is_none() {
+            return "connect_oauth";
+        }
+        return "test_connection";
+    }
+    if account.incoming.as_ref().is_some_and(|incoming| !has_secret_ref(incoming)) {
+        return "enter_secret";
+    }
+    if account.desired_status.as_deref() != Some("receive_only")
+        && account.outgoing.as_ref().is_some_and(|outgoing| !outgoing.use_incoming_secret.unwrap_or(false) && !has_secret_ref(outgoing))
+    {
+        return "enter_secret";
+    }
+    if matches!(account.desired_status.as_deref(), Some("disabled") | Some("incomplete")) {
+        return "save_disabled";
+    }
+    "test_connection"
+}
+
+fn test_steps_for(scope: &str, receive_only: bool) -> Result<Vec<String>, ErrorResponse> {
+    let steps = match scope {
+        "all" => {
+            let mut steps = vec!["imap_auth", "imap_mailbox_discovery", "folder_mapping"];
+            if !receive_only {
+                steps.insert(2, "smtp_auth");
+                steps.insert(3, "smtp_send_capability");
+            }
+            steps
+        }
+        "incoming" => vec!["imap_auth", "imap_mailbox_discovery"],
+        "outgoing" if !receive_only => vec!["smtp_auth", "smtp_send_capability"],
+        "folder_mapping" => vec!["folder_mapping"],
+        "outgoing" => return Err(ErrorResponse::new("AccountIncomplete", "Receive-only accounts do not plan outgoing SMTP tests")),
+        _ => return Err(ErrorResponse::new("InvalidInput", "test_scope must be all, incoming, outgoing, or folder_mapping")),
+    };
+    Ok(steps.into_iter().map(str::to_string).collect())
+}
+
+fn connection_test_passed(result: &ConnectionTestResult, receive_only: bool) -> bool {
+    let required = if receive_only {
+        vec!["imap_auth", "imap_mailbox_discovery"]
+    } else {
+        vec!["imap_auth", "imap_mailbox_discovery", "smtp_auth", "smtp_send_capability"]
+    };
+    required.iter().all(|required_step| {
+        result.steps.iter().any(|step| step.step == *required_step && matches!(step.state.as_str(), "passed" | "warning"))
+    })
+}
+
+fn account_summary_from_setup(account: &UserMailAccountSetup, make_default: bool, status: &str) -> MailAccountSummary {
+    let account_id = account.account_id.clone().unwrap_or_else(|| {
+        format!("acc_{}", hash_text(&format!("{}:{}", account.email_address, account.provider)))
+    });
+    MailAccountSummary {
+        account_id,
+        display_name: account.display_name.clone(),
+        email_address: account.email_address.clone(),
+        provider: Some(account.provider.clone()),
+        enabled: matches!(status, "active" | "receive_only"),
+        is_default: make_default,
+        sync_interval_minutes: account.sync.as_ref().and_then(|sync| sync.interval_minutes).unwrap_or(5),
+        color: None,
+        connection_state: Some(if status == "receive_only" { "receive_only" } else { "pending" }.to_string()),
+    }
+}
+
+fn validate_preferences(preferences: &UserMailPreferences) -> Result<(), ErrorResponse> {
+    let page_size = preferences.reading.get("page_size").and_then(Value::as_u64).unwrap_or(DEFAULT_PAGE_SIZE as u64);
+    if page_size == 0 || page_size > MAX_PAGE_SIZE as u64 {
+        return Err(ErrorResponse::new("InvalidInput", format!("reading.page_size must be between 1 and {MAX_PAGE_SIZE}")));
+    }
+    let undo = preferences.compose.get("undo_send_delay_seconds").and_then(Value::as_u64).unwrap_or(10) as u32;
+    match undo {
+        0 | 5 | 10 | 30 => Ok(()),
+        _ => Err(ErrorResponse::new("InvalidInput", "compose.undo_send_delay_seconds must be 0, 5, 10, or 30")),
+    }
+}
+
+fn inspect_legacy(legacy: &LegacySettings) -> LegacyInspectionData {
+    let accounts = legacy.settings.get("accounts").and_then(Value::as_array).cloned().unwrap_or_default();
+    let mut preferences_detected = Vec::new();
+    if legacy.ui_schemas.get("main").is_some() || legacy.settings.get("general").is_some() {
+        preferences_detected.push("reading");
+        preferences_detected.push("compose");
+        preferences_detected.push("notifications");
+    }
+    LegacyInspectionData {
+        accounts_detected: accounts.len(),
+        preferences_detected,
+        credential_risks: if accounts.is_empty() { Vec::new() } else { vec!["legacy_account_metadata_requires_reconnect"] },
+        migration_preview: json!({
+            "accounts": accounts.iter().map(|account| json!({
+                "email_address": account.get("email_address").cloned().unwrap_or(Value::Null),
+                "provider": account.get("auth_method").cloned().unwrap_or(Value::Null),
+                "requires_reconnect": true
+            })).collect::<Vec<Value>>()
+        }),
+        requires_user_reconnect: accounts.iter()
+            .filter_map(|account| account.get("email_address").and_then(Value::as_str).map(str::to_string))
+            .collect(),
+    }
+}
+
+fn handle_get_provider_capabilities(request: GetProviderCapabilitiesRequest) -> Result<OperationResponse<ProviderCapabilities>, ErrorResponse> {
+    require_effects(&request.context, &[EFFECT_PROVIDER_CAPABILITY_READ, EFFECT_MAIL_STORE_READ])?;
+    for provider_id in &request.provider_ids {
+        ensure_non_empty("provider_ids[]", provider_id)?;
+    }
+    let mut data = default_provider_capabilities();
+    if !request.provider_ids.is_empty() {
+        data.providers.retain(|provider| provider.get("provider").and_then(Value::as_str).is_some_and(|id| request.provider_ids.iter().any(|requested| requested == id)));
+    }
+    let host_effects = vec![
+        host_effect(&request.context, "get_provider_capabilities", EFFECT_PROVIDER_CAPABILITY_READ, "Read host account provider policy and connector availability", json!({ "user_id": request.context.user_id, "provider_ids": request.provider_ids })),
+        host_effect(&request.context, "get_provider_capabilities", EFFECT_MAIL_STORE_READ, "Read user mail preference bounds that affect account setup", json!({ "user_id": request.context.user_id })),
+    ];
+    Ok(OperationResponse { operation: "get_provider_capabilities", status: "accepted", data, host_effects, warnings: Vec::new() })
+}
+
+fn handle_validate_account_setup(request: ValidateAccountSetupRequest) -> Result<OperationResponse<AccountValidationData>, ErrorResponse> {
+    if request.admin_policy_snapshot.is_none() {
+        require_effects(&request.context, &[EFFECT_PROVIDER_CAPABILITY_READ])?;
+    }
+    let normalized = normalize_account(request.account);
+    let field_errors = validate_account_fields(&normalized);
+    let valid = field_errors.is_empty();
+    let mut redacted_normalized = normalized.clone();
+    redact_secret_refs(&mut redacted_normalized);
+    let data = AccountValidationData {
+        valid,
+        normalized_account: if valid { Some(redacted_normalized) } else { None },
+        field_errors,
+        warnings: Vec::new(),
+        next_required_action: next_account_action(&normalized, valid),
+    };
+    let host_effects = if request.admin_policy_snapshot.is_none() {
+        vec![host_effect(&request.context, "validate_account_setup", EFFECT_PROVIDER_CAPABILITY_READ, "Read host policy before validating user-scoped account setup", json!({ "user_id": request.context.user_id, "provider": normalized.provider }))]
+    } else {
+        Vec::new()
+    };
+    Ok(OperationResponse { operation: "validate_account_setup", status: "accepted", data, host_effects, warnings: Vec::new() })
+}
+
+fn handle_plan_connection_test(request: PlanConnectionTestRequest) -> Result<OperationResponse<ConnectionTestPlanData>, ErrorResponse> {
+    let normalized = normalize_account(request.account);
+    let errors = validate_account_fields(&normalized);
+    if !errors.is_empty() {
+        return Err(ErrorResponse::new("InvalidInput", "Account setup must be valid before planning connection tests").with_details(json!({ "field_errors": errors })));
+    }
+    let receive_only = normalized.desired_status.as_deref() == Some("receive_only");
+    let steps = test_steps_for(&request.test_scope, receive_only)?;
+    let mut required = vec![EFFECT_PROVIDER_CAPABILITY_READ, EFFECT_ACCOUNT_CREDENTIAL_READ, EFFECT_IMAP_SYNC, EFFECT_IMAP_FETCH];
+    if steps.iter().any(|step| step.starts_with("smtp")) {
+        required.push(EFFECT_SMTP_SEND);
+    }
+    require_effects(&request.context, &required)?;
+    let account_id = normalized.account_id.clone().unwrap_or_else(|| format!("acc_{}", hash_text(&normalized.email_address)));
+    let test_id = format!("test_{}", hash_text(&format!("{}:{}", account_id, request.test_scope)));
+    let data = ConnectionTestPlanData { account_id: account_id.clone(), test_id: test_id.clone(), steps: steps.clone(), requires_host_execution: true };
+    let host_effects = required.into_iter().map(|effect| host_effect(&request.context, "plan_connection_test", effect, "Plan host-owned connection test step without protocol I/O in Wasm", json!({ "user_id": request.context.user_id, "account_id": account_id, "test_id": test_id, "test_scope": request.test_scope, "steps": steps }))).collect();
+    Ok(OperationResponse { operation: "plan_connection_test", status: "accepted", data, host_effects, warnings: Vec::new() })
+}
+
+fn handle_complete_account_setup(request: CompleteAccountSetupRequest) -> Result<OperationResponse<AccountSetupCompletionData>, ErrorResponse> {
+    let normalized = normalize_account(request.account);
+    let errors = validate_account_fields(&normalized);
+    if !errors.is_empty() {
+        return Err(ErrorResponse::new("InvalidInput", "Account setup is not valid").with_details(json!({ "field_errors": errors })));
+    }
+    let status = request.save_mode.clone().or_else(|| normalized.desired_status.clone()).unwrap_or_else(|| "active".to_string());
+    if !matches!(status.as_str(), "active" | "receive_only" | "disabled" | "incomplete") {
+        return Err(ErrorResponse::new("InvalidInput", "save_mode must be active, receive_only, disabled, or incomplete"));
+    }
+    let receive_only = status == "receive_only";
+    if matches!(status.as_str(), "active" | "receive_only") {
+        match &request.connection_test_result {
+            Some(result) if connection_test_passed(result, receive_only) => {}
+            Some(_) => return Err(ErrorResponse::new("ConnectionTestFailed", "Connection test result did not pass required incoming/outgoing checks")),
+            None => return Err(ErrorResponse::new("ConnectionTestRequired", "Active account setup requires a sanitized host connection test result")),
+        }
+    }
+    let mut required = vec![EFFECT_ACCOUNT_CREDENTIAL_WRITE, EFFECT_STORE_PLATFORM_SECRET, EFFECT_MAIL_STORE_WRITE];
+    if status == "active" || status == "receive_only" {
+        required.push(EFFECT_IMAP_SYNC);
+    }
+    require_effects(&request.context, &required)?;
+    let account = account_summary_from_setup(&normalized, request.make_default, &status);
+    let data = AccountSetupCompletionData { account: account.clone(), status: status.clone(), requires_reconnect: false, requires_sync: matches!(status.as_str(), "active" | "receive_only") };
+    let host_effects = required.into_iter().map(|effect| host_effect(&request.context, "complete_account_setup", effect, "Persist user-scoped mail account metadata and secret references through host services", json!({ "user_id": request.context.user_id, "account_id": account.account_id, "status": status, "make_default": request.make_default }))).collect();
+    Ok(OperationResponse { operation: "complete_account_setup", status: "accepted", data, host_effects, warnings: Vec::new() })
+}
+
+fn handle_begin_oauth_account_setup(request: BeginOAuthAccountSetupRequest) -> Result<OperationResponse<OAuthBeginData>, ErrorResponse> {
+    validate_host_id("provider", &request.provider)?;
+    validate_email(&request.email_address)?;
+    require_effects(&request.context, &[EFFECT_PROVIDER_CAPABILITY_READ, EFFECT_OAUTH_CONNECT])?;
+    let authorization_ref = format!("authorization:{}", hash_text(&format!("{}:{}", request.provider, request.email_address)));
+    let next_route = request.redirect_route.clone().unwrap_or_else(|| "app://mail-client/settings/accounts".to_string());
+    let data = OAuthBeginData { provider: request.provider.clone(), authorization_ref_present: true, status: "host_action_required", next_route: next_route.clone() };
+    let host_effects = vec![
+        host_effect(&request.context, "begin_oauth_account_setup", EFFECT_PROVIDER_CAPABILITY_READ, "Validate OAuth provider availability", json!({ "user_id": request.context.user_id, "provider": request.provider })),
+        host_effect(&request.context, "begin_oauth_account_setup", EFFECT_OAUTH_CONNECT, "Start host-owned OAuth authorization", json!({ "user_id": request.context.user_id, "provider": request.provider, "email_address": request.email_address, "authorization_ref": authorization_ref, "requested_scopes": request.requested_scopes, "next_route": next_route })),
+    ];
+    Ok(OperationResponse { operation: "begin_oauth_account_setup", status: "accepted", data, host_effects, warnings: Vec::new() })
+}
+
+fn handle_complete_oauth_account_setup(request: CompleteOAuthAccountSetupRequest) -> Result<OperationResponse<OAuthCompletionData>, ErrorResponse> {
+    validate_host_id("provider", &request.provider)?;
+    validate_secret_ref("authorization_ref", &Some(request.authorization_ref.clone()))?;
+    validate_secret_ref("oauth_connection_ref", &Some(request.oauth_connection_ref.clone()))?;
+    require_effects(&request.context, &[EFFECT_OAUTH_CONNECT, EFFECT_ACCOUNT_CREDENTIAL_WRITE, EFFECT_MAIL_STORE_WRITE, EFFECT_IMAP_SYNC])?;
+    let account_setup = request.account.clone().unwrap_or(UserMailAccountSetup {
+        account_id: None,
+        revision: None,
+        account_label: request.provider.clone(),
+        display_name: request.provider.clone(),
+        email_address: format!("{}@example.invalid", request.context.user_id),
+        reply_to: None,
+        provider: request.provider.clone(),
+        auth_method: "oauth2".to_string(),
+        incoming: None,
+        outgoing: None,
+        oauth: Some(OAuthAccountConfig { provider: request.provider.clone(), connection_ref: None, redirect_state_ref: None, scopes: Vec::new() }),
+        sync: None,
+        folder_mapping: None,
+        desired_status: Some("active".to_string()),
+    });
+    if let Some(result) = &request.connection_test_result {
+        if !connection_test_passed(result, false) {
+            return Err(ErrorResponse::new("ConnectionTestFailed", "OAuth connection test result did not pass required checks"));
+        }
+    }
+    let account = account_summary_from_setup(&account_setup, false, "active");
+    let identity = MailIdentity {
+        identity_id: format!("id_{}", hash_text(&account.email_address)),
+        account_id: account.account_id.clone(),
+        kind: "primary".to_string(),
+        display_name: account.display_name.clone(),
+        email_address: account.email_address.clone(),
+        reply_to: None,
+        signature_id: None,
+        enabled: true,
+        is_default_for_account: true,
+        is_global_default: false,
+        verification_state: "host_verified".to_string(),
+    };
+    let host_effects = vec![
+        host_effect(&request.context, "complete_oauth_account_setup", EFFECT_OAUTH_CONNECT, "Read sanitized OAuth connection completion from host", json!({ "user_id": request.context.user_id, "provider": request.provider, "authorization_ref_present": true, "oauth_connection_ref_present": true })),
+        host_effect(&request.context, "complete_oauth_account_setup", EFFECT_ACCOUNT_CREDENTIAL_WRITE, "Store OAuth connection reference for user mail account", json!({ "user_id": request.context.user_id, "account_id": account.account_id, "oauth_connection_ref_present": true })),
+        host_effect(&request.context, "complete_oauth_account_setup", EFFECT_MAIL_STORE_WRITE, "Persist OAuth mail account and identity metadata", json!({ "user_id": request.context.user_id, "account_id": account.account_id })),
+        host_effect(&request.context, "complete_oauth_account_setup", EFFECT_IMAP_SYNC, "Schedule initial host mail sync for OAuth account", json!({ "user_id": request.context.user_id, "account_id": account.account_id })),
+    ];
+    Ok(OperationResponse { operation: "complete_oauth_account_setup", status: "accepted", data: OAuthCompletionData { account, identity, requires_sync: true }, host_effects, warnings: Vec::new() })
+}
+
+fn handle_disconnect_oauth_account(request: DisconnectOAuthAccountRequest) -> Result<OperationResponse<OAuthDisconnectData>, ErrorResponse> {
+    validate_host_id("account_id", &request.account_id)?;
+    validate_secret_ref("oauth_connection_ref", &request.oauth_connection_ref)?;
+    require_effects(&request.context, &[EFFECT_OAUTH_DISCONNECT, EFFECT_ACCOUNT_CREDENTIAL_WRITE, EFFECT_MAIL_STORE_WRITE])?;
+    let host_effects = vec![
+        host_effect(&request.context, "disconnect_oauth_account", EFFECT_OAUTH_DISCONNECT, "Revoke host-owned OAuth connection", json!({ "user_id": request.context.user_id, "account_id": request.account_id, "oauth_connection_ref_present": request.oauth_connection_ref.is_some() })),
+        host_effect(&request.context, "disconnect_oauth_account", EFFECT_ACCOUNT_CREDENTIAL_WRITE, "Mark OAuth credential reference revoked", json!({ "user_id": request.context.user_id, "account_id": request.account_id })),
+        host_effect(&request.context, "disconnect_oauth_account", EFFECT_MAIL_STORE_WRITE, "Update account enabled state after OAuth disconnect", json!({ "user_id": request.context.user_id, "account_id": request.account_id, "disabled": request.disable_account })),
+    ];
+    Ok(OperationResponse { operation: "disconnect_oauth_account", status: "accepted", data: OAuthDisconnectData { account_id: request.account_id, credential_state: "revoked", disabled: request.disable_account }, host_effects, warnings: Vec::new() })
+}
+
+fn handle_remove_account(request: RemoveAccountRequest) -> Result<OperationResponse<AccountRemovalData>, ErrorResponse> {
+    validate_host_id("account_id", &request.account_id)?;
+    validate_optional_host_id("revision", &request.revision)?;
+    let mut required = vec![EFFECT_ACCOUNT_CREDENTIAL_WRITE, EFFECT_MAIL_STORE_WRITE];
+    if request.remove_local_cache || request.delete_drafts {
+        required.push(EFFECT_MAIL_STORE_DELETE);
+    }
+    if request.cancel_scheduled_sends {
+        required.push(EFFECT_CANCEL_JOB);
+    }
+    require_effects(&request.context, &required)?;
+    let mut cleanup_planned = Vec::new();
+    if request.remove_local_cache { cleanup_planned.push("local_cache"); }
+    if request.cancel_scheduled_sends { cleanup_planned.push("scheduled_sends"); }
+    if request.delete_drafts { cleanup_planned.push("drafts"); }
+    let host_effects = required.into_iter().map(|effect| host_effect(&request.context, "remove_account", effect, "Remove or disable a user mail account through host services", json!({ "user_id": request.context.user_id, "account_id": request.account_id, "revision": request.revision, "cleanup_planned": cleanup_planned }))).collect();
+    Ok(OperationResponse { operation: "remove_account", status: "accepted", data: AccountRemovalData { account_id: request.account_id, status: "removed_pending_cleanup", cleanup_planned }, host_effects, warnings: Vec::new() })
+}
+
+fn handle_list_identities(request: ListIdentitiesRequest) -> Result<OperationResponse<IdentityListData>, ErrorResponse> {
+    require_effects(&request.context, &[EFFECT_ACCOUNT_CREDENTIAL_READ, EFFECT_MAIL_STORE_READ])?;
+    if let Some(account_id) = &request.account_id { ensure_non_empty("account_id", account_id)?; }
+    let snapshot = request.snapshot.unwrap_or_default();
+    let data = IdentityListData { identities: snapshot.identities, signatures: snapshot.signatures, needs_host_refresh: true };
+    let host_effects = vec![
+        host_effect(&request.context, "list_identities", EFFECT_ACCOUNT_CREDENTIAL_READ, "Read sender identity credential state without exposing secrets", json!({ "user_id": request.context.user_id, "account_id": request.account_id })),
+        host_effect(&request.context, "list_identities", EFFECT_MAIL_STORE_READ, "Read sender identities and signatures", json!({ "user_id": request.context.user_id, "account_id": request.account_id })),
+    ];
+    Ok(OperationResponse { operation: "list_identities", status: "accepted", data, host_effects, warnings: Vec::new() })
+}
+
+fn handle_save_identity(request: SaveIdentityRequest) -> Result<OperationResponse<IdentityMutationData>, ErrorResponse> {
+    ensure_non_empty("identity.identity_id", &request.identity.identity_id)?;
+    ensure_non_empty("identity.account_id", &request.identity.account_id)?;
+    validate_email(&request.identity.email_address)?;
+    if let Some(reply_to) = &request.identity.reply_to { if !reply_to.trim().is_empty() { validate_email(reply_to)?; } }
+    require_effects(&request.context, &[EFFECT_ACCOUNT_CREDENTIAL_WRITE, EFFECT_MAIL_STORE_WRITE])?;
+    let host_effects = vec![
+        host_effect(&request.context, "save_identity", EFFECT_ACCOUNT_CREDENTIAL_WRITE, "Validate identity send-as capability through host account services", json!({ "user_id": request.context.user_id, "account_id": request.identity.account_id, "identity_id": request.identity.identity_id, "revision": request.revision })),
+        host_effect(&request.context, "save_identity", EFFECT_MAIL_STORE_WRITE, "Persist sender identity metadata", json!({ "user_id": request.context.user_id, "identity": request.identity })),
+    ];
+    let verification_required = !matches!(request.identity.verification_state.as_str(), "allowed" | "host_verified" | "verified");
+    Ok(OperationResponse { operation: "save_identity", status: "accepted", data: IdentityMutationData { identity: request.identity, verification_required }, host_effects, warnings: Vec::new() })
+}
+
+fn handle_delete_identity(request: DeleteIdentityRequest) -> Result<OperationResponse<IdentityDeleteData>, ErrorResponse> {
+    ensure_non_empty("identity_id", &request.identity_id)?;
+    require_effects(&request.context, &[EFFECT_ACCOUNT_CREDENTIAL_WRITE, EFFECT_MAIL_STORE_WRITE])?;
+    let host_effects = vec![
+        host_effect(&request.context, "delete_identity", EFFECT_ACCOUNT_CREDENTIAL_WRITE, "Remove send-as authorization for an identity", json!({ "user_id": request.context.user_id, "identity_id": request.identity_id, "account_id": request.account_id, "force": request.force })),
+        host_effect(&request.context, "delete_identity", EFFECT_MAIL_STORE_WRITE, "Remove identity metadata and update defaults", json!({ "user_id": request.context.user_id, "identity_id": request.identity_id, "account_id": request.account_id, "force": request.force })),
+    ];
+    Ok(OperationResponse { operation: "delete_identity", status: "accepted", data: IdentityDeleteData { identity_id: request.identity_id, removed: true, default_reassigned_to: None }, host_effects, warnings: Vec::new() })
+}
+
+fn handle_save_signature(request: SaveSignatureRequest) -> Result<OperationResponse<SignatureMutationData>, ErrorResponse> {
+    ensure_non_empty("signature.signature_id", &request.signature.signature_id)?;
+    ensure_non_empty("signature.account_id", &request.signature.account_id)?;
+    ensure_non_empty("signature.label", &request.signature.label)?;
+    validate_compose_body("signature", &request.signature.body_html, &request.signature.body_text)?;
+    require_effects(&request.context, &[EFFECT_MAIL_STORE_WRITE])?;
+    let host_effects = vec![host_effect(&request.context, "save_signature", EFFECT_MAIL_STORE_WRITE, "Persist user signature metadata and content", json!({ "user_id": request.context.user_id, "signature": request.signature, "revision": request.revision }))];
+    Ok(OperationResponse { operation: "save_signature", status: "accepted", data: SignatureMutationData { signature: request.signature }, host_effects, warnings: Vec::new() })
+}
+
+fn handle_delete_signature(request: DeleteSignatureRequest) -> Result<OperationResponse<SignatureDeleteData>, ErrorResponse> {
+    ensure_non_empty("signature_id", &request.signature_id)?;
+    require_effects(&request.context, &[EFFECT_MAIL_STORE_WRITE, EFFECT_MAIL_STORE_DELETE])?;
+    let host_effects = vec![
+        host_effect(&request.context, "delete_signature", EFFECT_MAIL_STORE_WRITE, "Clear identity defaults that reference a deleted signature", json!({ "user_id": request.context.user_id, "signature_id": request.signature_id, "account_id": request.account_id })),
+        host_effect(&request.context, "delete_signature", EFFECT_MAIL_STORE_DELETE, "Delete user signature", json!({ "user_id": request.context.user_id, "signature_id": request.signature_id, "account_id": request.account_id, "force": request.force })),
+    ];
+    Ok(OperationResponse { operation: "delete_signature", status: "accepted", data: SignatureDeleteData { signature_id: request.signature_id, removed: true, identity_updates: Vec::new() }, host_effects, warnings: Vec::new() })
+}
+
+fn handle_get_user_preferences(request: GetUserPreferencesRequest) -> Result<OperationResponse<UserPreferencesData>, ErrorResponse> {
+    require_effects(&request.context, &[EFFECT_MAIL_STORE_READ])?;
+    let data = UserPreferencesData { preferences: request.snapshot.unwrap_or_else(default_preferences), defaults_applied: request.include_defaults, needs_host_refresh: true };
+    let host_effects = vec![host_effect(&request.context, "get_user_preferences", EFFECT_MAIL_STORE_READ, "Read user-scoped mail preferences", json!({ "user_id": request.context.user_id, "include_defaults": request.include_defaults }))];
+    Ok(OperationResponse { operation: "get_user_preferences", status: "accepted", data, host_effects, warnings: Vec::new() })
+}
+
+fn handle_save_user_preferences(request: SaveUserPreferencesRequest) -> Result<OperationResponse<UserPreferencesMutationData>, ErrorResponse> {
+    validate_preferences(&request.preferences)?;
+    require_effects(&request.context, &[EFFECT_MAIL_STORE_WRITE])?;
+    let host_effects = vec![host_effect(&request.context, "save_user_preferences", EFFECT_MAIL_STORE_WRITE, "Persist user-scoped mail preferences", json!({ "user_id": request.context.user_id, "preferences": request.preferences, "revision": request.revision }))];
+    Ok(OperationResponse { operation: "save_user_preferences", status: "accepted", data: UserPreferencesMutationData { preferences: request.preferences, changed_groups: vec!["reading", "compose", "notifications", "sync_defaults"] }, host_effects, warnings: Vec::new() })
+}
+
+fn handle_inspect_legacy_settings(request: InspectLegacySettingsRequest) -> Result<OperationResponse<LegacyInspectionData>, ErrorResponse> {
+    let host_effects = if request.legacy_settings.is_none() {
+        require_effects(&request.context, &[EFFECT_MAIL_STORE_READ])?;
+        vec![host_effect(&request.context, "inspect_legacy_settings", EFFECT_MAIL_STORE_READ, "Read legacy settings for explicit user-scoped migration preview", json!({ "user_id": request.context.user_id }))]
+    } else {
+        Vec::new()
+    };
+    let data = inspect_legacy(&request.legacy_settings.unwrap_or_default());
+    Ok(OperationResponse { operation: "inspect_legacy_settings", status: "accepted", data, host_effects, warnings: Vec::new() })
+}
+
+fn handle_migrate_legacy_settings(request: MigrateLegacySettingsRequest) -> Result<OperationResponse<LegacyMigrationData>, ErrorResponse> {
+    let mut required = vec![EFFECT_MAIL_STORE_READ, EFFECT_MAIL_STORE_WRITE, EFFECT_MAIL_STORE_DELETE];
+    if !request.dry_run {
+        required.push(EFFECT_ACCOUNT_CREDENTIAL_WRITE);
+    }
+    require_effects(&request.context, &required)?;
+    let inspection = inspect_legacy(&request.legacy_settings);
+    let migrated_preferences = json!({
+        "reading": {
+            "thread_view": request.legacy_settings.ui_schemas.get("main").and_then(|main| main.get("properties")).and_then(|properties| properties.get("thread_view")).cloned().unwrap_or(Value::Null),
+            "focused_inbox": request.legacy_settings.ui_schemas.get("main").and_then(|main| main.get("properties")).and_then(|properties| properties.get("focused_inbox")).cloned().unwrap_or(Value::Null)
+        },
+        "migration_note": "legacy schema-rendered settings classified for user-scoped preferences"
+    });
+    let obsolete_keys_removed = if request.dry_run { Vec::new() } else { vec!["ui_schemas.main", "ui_schemas.settings", "settings.accounts", "settings.general"] };
+    let data = LegacyMigrationData {
+        migrated_accounts: inspection.migration_preview.get("accounts").and_then(Value::as_array).cloned().unwrap_or_default(),
+        migrated_preferences,
+        migration_map: json!({
+            "ui_schemas.main.thread_view": "preferences.reading.thread_view",
+            "ui_schemas.main.focused_inbox": "preferences.reading.focused_inbox",
+            "ui_schemas.main.preview_pane": "preferences.reading.preview_pane",
+            "settings.accounts[]": "user_mail_account_setup_requires_reconnect",
+            "settings.general.undo_send_delay_seconds": "preferences.compose.undo_send_delay_seconds"
+        }),
+        requires_reconnect: inspection.requires_user_reconnect,
+        obsolete_keys_removed,
+    };
+    let host_effects = required.into_iter().map(|effect| host_effect(&request.context, "migrate_legacy_settings", effect, "Migrate legacy settings into user-scoped mail records without moving credentials into admin policy", json!({ "user_id": request.context.user_id, "dry_run": request.dry_run, "migration_options": request.migration_options }))).collect();
+    Ok(OperationResponse { operation: "migrate_legacy_settings", status: "accepted", data, host_effects, warnings: Vec::new() })
 }
 
 macro_rules! export_operation {
@@ -2527,6 +3888,125 @@ export_operation!(
     [EFFECT_MAIL_STORE_WRITE, EFFECT_CANCEL_JOB],
     handle_cancel_scheduled_send
 );
+export_operation!(
+    get_provider_capabilities,
+    GetProviderCapabilitiesRequest,
+    Permission::Accounts,
+    [],
+    handle_get_provider_capabilities
+);
+export_operation!(
+    validate_account_setup,
+    ValidateAccountSetupRequest,
+    Permission::Accounts,
+    [],
+    handle_validate_account_setup
+);
+export_operation!(
+    plan_connection_test,
+    PlanConnectionTestRequest,
+    Permission::Accounts,
+    [],
+    handle_plan_connection_test
+);
+export_operation!(
+    complete_account_setup,
+    CompleteAccountSetupRequest,
+    Permission::Accounts,
+    [],
+    handle_complete_account_setup
+);
+export_operation!(
+    begin_oauth_account_setup,
+    BeginOAuthAccountSetupRequest,
+    Permission::Accounts,
+    [],
+    handle_begin_oauth_account_setup
+);
+export_operation!(
+    complete_oauth_account_setup,
+    CompleteOAuthAccountSetupRequest,
+    Permission::Accounts,
+    [],
+    handle_complete_oauth_account_setup
+);
+export_operation!(
+    disconnect_oauth_account,
+    DisconnectOAuthAccountRequest,
+    Permission::Accounts,
+    [],
+    handle_disconnect_oauth_account
+);
+export_operation!(
+    remove_account,
+    RemoveAccountRequest,
+    Permission::Accounts,
+    [],
+    handle_remove_account
+);
+export_operation!(
+    list_identities,
+    ListIdentitiesRequest,
+    Permission::Accounts,
+    [],
+    handle_list_identities
+);
+export_operation!(
+    save_identity,
+    SaveIdentityRequest,
+    Permission::Accounts,
+    [],
+    handle_save_identity
+);
+export_operation!(
+    delete_identity,
+    DeleteIdentityRequest,
+    Permission::Accounts,
+    [],
+    handle_delete_identity
+);
+export_operation!(
+    save_signature,
+    SaveSignatureRequest,
+    Permission::Accounts,
+    [],
+    handle_save_signature
+);
+export_operation!(
+    delete_signature,
+    DeleteSignatureRequest,
+    Permission::Accounts,
+    [],
+    handle_delete_signature
+);
+export_operation!(
+    get_user_preferences,
+    GetUserPreferencesRequest,
+    Permission::Accounts,
+    [],
+    handle_get_user_preferences
+);
+export_operation!(
+    save_user_preferences,
+    SaveUserPreferencesRequest,
+    Permission::Accounts,
+    [],
+    handle_save_user_preferences
+);
+export_operation!(
+    inspect_legacy_settings,
+    InspectLegacySettingsRequest,
+    Permission::Accounts,
+    [],
+    handle_inspect_legacy_settings
+);
+export_operation!(
+    migrate_legacy_settings,
+    MigrateLegacySettingsRequest,
+    Permission::Accounts,
+    [],
+    handle_migrate_legacy_settings
+);
 
 #[no_mangle]
 pub extern "C" fn free_string(ptr: *mut c_char) {
@@ -2536,5 +4016,353 @@ pub extern "C" fn free_string(ptr: *mut c_char) {
 
     unsafe {
         let _ = CString::from_raw(ptr);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn context(permission: &str, effects: &[&str]) -> RequestContext {
+        RequestContext {
+            user_id: "usr_test".to_string(),
+            permission: permission.to_string(),
+            available_effects: effects.iter().map(|effect| effect.to_string()).collect(),
+            agent_id: None,
+            request_id: Some("req_test".to_string()),
+        }
+    }
+
+    fn call_export(export: extern "C" fn(*const u8, usize) -> *mut u8, payload: Value) -> Value {
+        let body = serde_json::to_string(&payload).expect("payload serializes");
+        let ptr = export(body.as_ptr(), body.len());
+        assert!(!ptr.is_null());
+        let response = unsafe { CString::from_raw(ptr as *mut c_char) };
+        serde_json::from_str(response.to_str().expect("utf8 response")).expect("json response")
+    }
+
+    fn account_payload() -> Value {
+        json!({
+            "account_label": "Work",
+            "display_name": "Test User",
+            "email_address": "test@example.com",
+            "provider": "manual_imap_smtp",
+            "auth_method": "app_password",
+            "incoming": {
+                "protocol": "imap",
+                "host": "imap.example.com",
+                "port": 993,
+                "security": "ssl_tls",
+                "username": "test@example.com",
+                "auth_method": "app_password",
+                "secret_input_ref": "host-secure-field:incoming"
+            },
+            "outgoing": {
+                "protocol": "smtp",
+                "host": "smtp.example.com",
+                "port": 587,
+                "security": "starttls",
+                "username": "test@example.com",
+                "auth_method": "app_password",
+                "use_incoming_secret": true
+            },
+            "sync": { "interval_minutes": 5 },
+            "desired_status": "active"
+        })
+    }
+
+    #[test]
+    fn validate_account_setup_reports_field_errors_without_echoing_raw_secret_names() {
+        let mut account = account_payload();
+        account["email_address"] = json!("not-an-email");
+        account["password"] = json!("super-secret");
+        let response = call_export(
+            validate_account_setup,
+            json!({
+                "context": context("accounts", &[EFFECT_PROVIDER_CAPABILITY_READ]),
+                "account": account
+            }),
+        );
+
+        assert_eq!(response["ok"]["operation"], "validate_account_setup");
+        assert_eq!(response["ok"]["data"]["valid"], false);
+        let serialized = serde_json::to_string(&response).unwrap();
+        assert!(!serialized.contains("super-secret"));
+        assert!(!serialized.contains("\"password\""));
+    }
+
+    #[test]
+    fn permission_matrix_keeps_organize_and_accounts_non_linear() {
+        assert!(Permission::Organize.satisfies(Permission::Read));
+        assert!(Permission::Organize.satisfies(Permission::Organize));
+        assert!(!Permission::Organize.satisfies(Permission::Draft));
+        assert!(!Permission::Organize.satisfies(Permission::Send));
+        assert!(!Permission::Organize.satisfies(Permission::Accounts));
+        assert!(!Permission::Organize.satisfies(Permission::Admin));
+
+        assert!(Permission::Accounts.satisfies(Permission::Read));
+        assert!(Permission::Accounts.satisfies(Permission::Accounts));
+        assert!(!Permission::Accounts.satisfies(Permission::Send));
+        assert!(!Permission::Accounts.satisfies(Permission::Organize));
+        assert!(!Permission::Accounts.satisfies(Permission::Admin));
+    }
+
+    #[test]
+    fn account_exports_require_accounts_permission() {
+        let response = call_export(
+            validate_account_setup,
+            json!({
+                "context": context("send", &[EFFECT_PROVIDER_CAPABILITY_READ]),
+                "account": account_payload()
+            }),
+        );
+
+        assert_eq!(response["err"]["code"], "PermissionDenied");
+    }
+
+    #[test]
+    fn organize_permission_cannot_send_email_export() {
+        let response = call_export(
+            send_email,
+            json!({
+                "context": context("organize", &[EFFECT_MAIL_STORE_WRITE, EFFECT_SMTP_SEND]),
+                "draft_id": "draft-1",
+                "account_id": "acc-1"
+            }),
+        );
+
+        assert_eq!(response["err"]["code"], "PermissionDenied");
+    }
+
+    #[test]
+    fn accounts_permission_cannot_organize_email_export() {
+        let response = call_export(
+            flag_email,
+            json!({
+                "context": context("accounts", &[EFFECT_MAIL_STORE_WRITE]),
+                "email_ids": ["email-1"],
+                "flagged": true
+            }),
+        );
+
+        assert_eq!(response["err"]["code"], "PermissionDenied");
+    }
+
+    #[test]
+    fn validate_account_setup_rejects_raw_secret_ref_and_redacts_valid_refs() {
+        let mut raw_account = account_payload();
+        raw_account["incoming"]["secret_input_ref"] = json!("plain-password-or-random-text");
+        let raw_response = call_export(
+            validate_account_setup,
+            json!({
+                "context": context("accounts", &[EFFECT_PROVIDER_CAPABILITY_READ]),
+                "account": raw_account
+            }),
+        );
+        assert_eq!(raw_response["ok"]["data"]["valid"], false);
+
+        let valid_response = call_export(
+            validate_account_setup,
+            json!({
+                "context": context("accounts", &[EFFECT_PROVIDER_CAPABILITY_READ]),
+                "account": account_payload()
+            }),
+        );
+        let serialized = serde_json::to_string(&valid_response).unwrap();
+        assert_eq!(valid_response["ok"]["data"]["valid"], true);
+        assert!(!serialized.contains("host-secure-field:incoming"));
+        assert!(!serialized.contains("secret_input_ref"));
+    }
+
+    #[test]
+    fn plan_connection_test_requires_host_effects_and_plans_protocol_steps() {
+        let response = call_export(
+            plan_connection_test,
+            json!({
+                "context": context("accounts", &[
+                    EFFECT_PROVIDER_CAPABILITY_READ,
+                    EFFECT_ACCOUNT_CREDENTIAL_READ,
+                    EFFECT_IMAP_SYNC,
+                    EFFECT_IMAP_FETCH,
+                    EFFECT_SMTP_SEND
+                ]),
+                "account": account_payload(),
+                "test_scope": "all"
+            }),
+        );
+
+        assert_eq!(response["ok"]["data"]["requires_host_execution"], true);
+        assert_eq!(response["ok"]["data"]["steps"].as_array().unwrap().len(), 5);
+        assert_eq!(response["ok"]["host_effects"].as_array().unwrap().len(), 5);
+    }
+
+    #[test]
+    fn complete_account_setup_requires_connection_test_for_active_accounts() {
+        let response = call_export(
+            complete_account_setup,
+            json!({
+                "context": context("accounts", &[
+                    EFFECT_ACCOUNT_CREDENTIAL_WRITE,
+                    EFFECT_STORE_PLATFORM_SECRET,
+                    EFFECT_MAIL_STORE_WRITE,
+                    EFFECT_IMAP_SYNC
+                ]),
+                "account": account_payload(),
+                "save_mode": "active"
+            }),
+        );
+
+        assert_eq!(response["err"]["code"], "ConnectionTestRequired");
+    }
+
+    #[test]
+    fn state_changing_host_effect_keys_include_payload_hash_with_request_id() {
+        let first = call_export(
+            send_email,
+            json!({
+                "context": context("send", &[EFFECT_MAIL_STORE_WRITE, EFFECT_SMTP_SEND]),
+                "draft_id": "draft-1",
+                "account_id": "acc-1"
+            }),
+        );
+        let second = call_export(
+            send_email,
+            json!({
+                "context": context("send", &[EFFECT_MAIL_STORE_WRITE, EFFECT_SMTP_SEND]),
+                "draft_id": "draft-2",
+                "account_id": "acc-1"
+            }),
+        );
+        let first_key = first["ok"]["host_effects"][0]["idempotency_key"].as_str().unwrap();
+        let second_key = second["ok"]["host_effects"][0]["idempotency_key"].as_str().unwrap();
+        assert_ne!(first_key, second_key);
+
+        let folder_first = call_export(
+            move_email,
+            json!({
+                "context": context("organize", &[EFFECT_MAIL_STORE_WRITE]),
+                "email_ids": ["email-1"],
+                "destination_mailbox_id": "archive"
+            }),
+        );
+        let folder_second = call_export(
+            move_email,
+            json!({
+                "context": context("organize", &[EFFECT_MAIL_STORE_WRITE]),
+                "email_ids": ["email-1"],
+                "destination_mailbox_id": "projects"
+            }),
+        );
+        assert_ne!(
+            folder_first["ok"]["host_effects"][0]["idempotency_key"],
+            folder_second["ok"]["host_effects"][0]["idempotency_key"]
+        );
+    }
+
+    #[test]
+    fn host_bound_inputs_reject_controls_and_unsupported_shapes() {
+        let search_response = call_export(
+            search_emails,
+            json!({
+                "context": context("read", &[EFFECT_ACCOUNT_CREDENTIAL_READ, EFFECT_IMAP_FETCH]),
+                "query": "hello\nworld"
+            }),
+        );
+        assert_eq!(search_response["err"]["code"], "InvalidInput");
+
+        let rule_response = call_export(
+            create_rule,
+            json!({
+                "context": context("organize", &[EFFECT_MAIL_STORE_WRITE]),
+                "account_id": "acc-1",
+                "rule": {
+                    "rule_id": "rule-1",
+                    "name": "Bad rule",
+                    "enabled": true,
+                    "stop_processing": false,
+                    "priority": 1,
+                    "conditions": [{ "field": "anything", "operator": "equals", "value": "x" }],
+                    "actions": [{ "action_type": "move_to", "value": "archive" }]
+                }
+            }),
+        );
+        assert_eq!(rule_response["err"]["code"], "InvalidInput");
+    }
+
+    #[test]
+    fn email_validation_rejects_control_chars_without_echoing_input() {
+        let response = call_export(
+            draft_email,
+            json!({
+                "context": context("draft", &[EFFECT_MAIL_STORE_WRITE]),
+                "draft": {
+                    "account_id": "acc-1",
+                    "to": [{ "email": "victim@example.com\nBcc:evil@example.com" }],
+                    "subject": "Hello",
+                    "body_text": "Body"
+                }
+            }),
+        );
+        assert_eq!(response["err"]["code"], "InvalidRecipient");
+        let serialized = serde_json::to_string(&response).unwrap();
+        assert!(!serialized.contains("victim@example.com"));
+        assert!(!serialized.contains("evil@example.com"));
+    }
+
+    #[test]
+    fn save_user_preferences_validates_bounds() {
+        let response = call_export(
+            save_user_preferences,
+            json!({
+                "context": context("accounts", &[EFFECT_MAIL_STORE_WRITE]),
+                "preferences": {
+                    "reading": { "page_size": 250 },
+                    "compose": { "undo_send_delay_seconds": 10 },
+                    "notifications": { "enabled": true },
+                    "sync_defaults": { "interval_minutes": 5 }
+                }
+            }),
+        );
+
+        assert_eq!(response["err"]["code"], "InvalidInput");
+    }
+
+    #[test]
+    fn migrate_legacy_settings_maps_old_schema_to_user_scoped_records() {
+        let response = call_export(
+            migrate_legacy_settings,
+            json!({
+                "context": context("accounts", &[
+                    EFFECT_MAIL_STORE_READ,
+                    EFFECT_MAIL_STORE_WRITE,
+                    EFFECT_MAIL_STORE_DELETE,
+                    EFFECT_ACCOUNT_CREDENTIAL_WRITE
+                ]),
+                "legacy_settings": {
+                    "ui_schemas": { "main": { "properties": { "thread_view": { "default": true } } } },
+                    "settings": { "accounts": [{ "email_address": "old@example.com" }] }
+                },
+                "dry_run": false
+            }),
+        );
+
+        assert_eq!(response["ok"]["data"]["requires_reconnect"][0], "old@example.com");
+        assert!(response["ok"]["data"]["migration_map"].get("settings.accounts[]").is_some());
+    }
+
+    #[test]
+    fn existing_read_emails_workflow_is_preserved() {
+        let response = call_export(
+            read_emails,
+            json!({
+                "context": context("read", &[EFFECT_ACCOUNT_CREDENTIAL_READ, EFFECT_IMAP_FETCH]),
+                "mailbox_id": "inbox",
+                "pagination": { "offset": 0, "limit": 25 },
+                "snapshot": { "messages": [], "total_count": 0, "unread_count": 0 }
+            }),
+        );
+
+        assert_eq!(response["ok"]["operation"], "read_emails");
+        assert_eq!(response["ok"]["data"]["page"]["limit"], 25);
     }
 }

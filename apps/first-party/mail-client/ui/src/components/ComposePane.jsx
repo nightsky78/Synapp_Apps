@@ -45,6 +45,8 @@ export default function ComposePane() {
   const [draftId, setDraftId]   = useState(null);
   const [saveStatus, setSaveStatus] = useState('');
   const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [fromAccountId, setFromAccountId] = useState(state.activeAccountId || '');
+  const [includeSignature, setIncludeSignature] = useState(true);
 
   const bodyRef = useRef(null);
   const autoSaveTimer = useRef(null);
@@ -56,15 +58,15 @@ export default function ComposePane() {
 
   const buildDraftPayload = useCallback(() => ({
     draft_id: draftId || undefined,
-    account_id: state.activeAccountId,
+    account_id: fromAccountId || state.activeAccountId,
     to: to.map(e => ({ email: e })),
     cc: cc.map(e => ({ email: e })),
     bcc: bcc.map(e => ({ email: e })),
     subject,
-    body_text: body,
-    body_html: `<p>${body.replace(/\n/g, '<br/>')}</p>`,
+    body_text: includeSignature ? `${body}\n\nBest regards` : body,
+    body_html: `<p>${(includeSignature ? `${body}\n\nBest regards` : body).replace(/\n/g, '<br/>')}</p>`,
     in_reply_to: replyCtx ? replyCtx.emailId : undefined,
-  }), [draftId, state.activeAccountId, to, cc, bcc, subject, body, replyCtx]);
+  }), [draftId, fromAccountId, state.activeAccountId, to, cc, bcc, subject, body, includeSignature, replyCtx]);
 
   const saveDraft = useCallback(async (silent = false) => {
     if (!can('draft')) return;
@@ -153,6 +155,8 @@ export default function ComposePane() {
     if (to.length === 0) { toast('Add at least one recipient', 'error'); return; }
     if (!subject.trim()) { toast('Subject is required', 'error'); return; }
     if (!can('send')) { toast('You do not have Send permission', 'error'); return; }
+    const account = state.accounts.find(item => item.account_id === (fromAccountId || state.activeAccountId));
+    if (account?.connection_state === 'receive_only') { toast('This account is receive-only until SMTP passes', 'error'); return; }
 
     setSending(true);
     try {
@@ -165,7 +169,7 @@ export default function ComposePane() {
       } else {
         await invoke('update_draft', { draft: buildDraftPayload() });
       }
-      await invoke('send_email', { draft_id: dId, account_id: state.activeAccountId });
+      await invoke('send_email', { draft_id: dId, account_id: fromAccountId || state.activeAccountId });
       toast('Message sent!', 'success');
       closeCompose();
     } catch (err) {
@@ -177,6 +181,8 @@ export default function ComposePane() {
 
   async function handleScheduleSend() {
     if (to.length === 0) { toast('Add at least one recipient', 'error'); return; }
+    const account = state.accounts.find(item => item.account_id === (fromAccountId || state.activeAccountId));
+    if (account?.connection_state === 'receive_only') { toast('This account is receive-only until SMTP passes', 'error'); return; }
     const tomorrowNoon = Math.floor(Date.now() / 1000) + 24 * 3600;
     setSending(true);
     try {
@@ -186,7 +192,7 @@ export default function ComposePane() {
         dId = dres.data.suggested_draft_id;
         setDraftId(dId);
       }
-      await invoke('schedule_send', { draft_id: dId, account_id: state.activeAccountId, send_at: tomorrowNoon });
+      await invoke('schedule_send', { draft_id: dId, account_id: fromAccountId || state.activeAccountId, scheduled_for: tomorrowNoon });
       toast('Scheduled for tomorrow noon', 'success');
       closeCompose();
     } catch (err) {
@@ -216,6 +222,16 @@ export default function ComposePane() {
         </div>
 
         <div className="compose-window__fields">
+          <div className="compose-field">
+            <span className="compose-field__label">From</span>
+            <select className="compose-field__input" value={fromAccountId} onChange={event => setFromAccountId(event.target.value)} aria-label="From account">
+              {state.accounts.map(account => (
+                <option key={account.account_id} value={account.account_id}>
+                  {(account.account_label || account.display_name || account.email_address)} {account.connection_state === 'receive_only' ? '(receive-only)' : ''}
+                </option>
+              ))}
+            </select>
+          </div>
           <EmailChipInput label="To" chips={to} setChips={setTo} input={toInput} setInput={setToInput} />
 
           {!showCcBcc && (
@@ -245,6 +261,10 @@ export default function ComposePane() {
               aria-label="Subject"
             />
           </div>
+          <div className="compose-field compose-field--compact">
+            <span className="compose-field__label" />
+            <label className="checkbox-line"><input type="checkbox" checked={includeSignature} onChange={event => setIncludeSignature(event.target.checked)} /> Include default signature</label>
+          </div>
         </div>
 
         <div className="compose-window__body">
@@ -265,7 +285,7 @@ export default function ComposePane() {
             title={!can('send') ? 'Send permission required' : 'Send email'}
             aria-label="Send"
           >
-            {sending ? <><Spinner size="sm" /> Sending…</> : '➤ Send'}
+            {sending ? <><Spinner size="sm" /> Sending...</> : 'Send'}
           </button>
 
           <div style={{ position: 'relative' }}>
@@ -276,7 +296,7 @@ export default function ComposePane() {
               aria-label="Schedule send options"
               title={!can('send') ? 'Send permission required' : 'Schedule send'}
             >
-              ⏰ Schedule
+              Schedule
             </button>
             {scheduleOpen && (
               <div style={{ position: 'absolute', bottom: '110%', left: 0, background: '#fff', border: '1px solid #e0e0e0', borderRadius: 4, boxShadow: '0 4px 12px rgba(0,0,0,.12)', minWidth: 180, zIndex: 10 }}>
@@ -294,7 +314,7 @@ export default function ComposePane() {
             title={!can('draft') ? 'Draft permission required' : 'Save draft'}
             aria-label="Save draft"
           >
-            💾 Save draft
+            Save draft
           </button>
 
           <button
@@ -304,7 +324,7 @@ export default function ComposePane() {
             aria-label="Discard draft"
             title="Discard draft"
           >
-            🗑️ Discard
+            Discard
           </button>
 
           <span className="compose-window__save-status">{saveStatus}</span>

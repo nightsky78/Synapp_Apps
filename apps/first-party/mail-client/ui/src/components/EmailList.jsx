@@ -15,7 +15,7 @@ function formatDate(unix) {
   return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
 }
 
-function EmailItem({ email, active, onSelect, onFlag }) {
+function EmailItem({ email, active, selected, onSelect, onFlag, onToggleSelected }) {
   return (
     <article
       className={`email-item${!email.is_read ? ' email-item--unread' : ''}${active ? ' email-item--active' : ''}`}
@@ -26,6 +26,14 @@ function EmailItem({ email, active, onSelect, onFlag }) {
       aria-label={`Email from ${email.from.display_name || email.from.email}: ${email.subject}`}
       aria-pressed={active}
     >
+      <label className="email-item__select" onClick={event => event.stopPropagation()}>
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={() => onToggleSelected(email.email_id)}
+          aria-label={`Select message ${email.subject}`}
+        />
+      </label>
       <div className="email-item__row1">
         <span className={`email-item__unread-dot${email.is_read ? ' email-item__unread-dot--hidden' : ''}`} aria-hidden="true" />
         <span className="email-item__from">
@@ -57,10 +65,17 @@ function EmailItem({ email, active, onSelect, onFlag }) {
 }
 
 export default function EmailList() {
-  const { state, loadEmails, selectEmail, flagEmail } = useApp();
+  const { state, dispatch, loadEmails, selectEmail, flagEmail, bulkArchive, bulkDelete, bulkMarkRead, can } = useApp();
 
   const mailbox = state.mailboxes.find(m => m.mailbox_id === state.activeMailboxId);
+  const visibleEmails = state.emails.filter(email => {
+    if (state.activeFilter === 'unread') return !email.is_read;
+    if (state.activeFilter === 'flagged') return email.is_flagged;
+    if (state.activeFilter === 'attachments') return email.has_attachments;
+    return true;
+  });
   const totalPages = Math.ceil(state.emailsTotal / PAGE_SIZE);
+  const allVisibleSelected = visibleEmails.length > 0 && visibleEmails.every(email => state.selectedEmailIds.includes(email.email_id));
 
   const handleSelect = useCallback((email) => selectEmail(email), [selectEmail]);
   const handleFlag = useCallback((id) => flagEmail(id), [flagEmail]);
@@ -75,23 +90,36 @@ export default function EmailList() {
         </div>
       </div>
 
+      <div className="bulk-toolbar" role="toolbar" aria-label="Bulk message actions">
+        <label className="bulk-toolbar__select">
+          <input type="checkbox" checked={allVisibleSelected} onChange={event => dispatch({ type: 'SELECT_ALL_VISIBLE', payload: event.target.checked })} aria-label="Select all visible messages" />
+          <span>{state.selectedEmailIds.length ? `${state.selectedEmailIds.length} selected` : 'Select'}</span>
+        </label>
+        <button onClick={() => bulkMarkRead(true)} disabled={!state.selectedEmailIds.length}>Read</button>
+        <button onClick={() => bulkMarkRead(false)} disabled={!state.selectedEmailIds.length}>Unread</button>
+        <button onClick={bulkArchive} disabled={!state.selectedEmailIds.length || !can('organize')}>Archive</button>
+        <button onClick={bulkDelete} disabled={!state.selectedEmailIds.length || !can('organize')}>Delete</button>
+        <button onClick={() => dispatch({ type: 'SET_SETTINGS_SECTION', payload: 'rules' })} disabled={!state.selectedEmailIds.length || !can('organize')}>Rule</button>
+      </div>
+
       <div className="list-panel__list" role="list">
         {state.loadingEmails && state.emails.length === 0 ? (
           <CenteredSpinner label="Loading emails…" />
-        ) : state.emails.length === 0 ? (
+        ) : visibleEmails.length === 0 ? (
           <div className="empty-state">
-            <div className="empty-state__icon">📭</div>
             <div className="empty-state__title">No messages</div>
-            <div className="empty-state__body">This folder is empty.</div>
+            <div className="empty-state__body">This view has no messages. Try another filter, folder, or search scope.</div>
           </div>
         ) : (
-          state.emails.map(email => (
+          visibleEmails.map(email => (
             <EmailItem
               key={email.email_id}
               email={email}
               active={state.activeEmailId === email.email_id}
+              selected={state.selectedEmailIds.includes(email.email_id)}
               onSelect={handleSelect}
               onFlag={handleFlag}
+              onToggleSelected={(id) => dispatch({ type: 'TOGGLE_SELECTED_EMAIL', payload: id })}
             />
           ))
         )}

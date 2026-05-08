@@ -22,6 +22,28 @@ fi
 APP_ID="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["app_id"])' "$MANIFEST")"
 VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$MANIFEST")"
 ENTRYPOINT="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["entrypoint"])' "$MANIFEST")"
+UI_ENTRYPOINT="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("ui", {}).get("entrypoint", ""))' "$MANIFEST")"
+
+mapfile -t SAFE_PACKAGE_PATHS < <(python3 - "$ENTRYPOINT" "$UI_ENTRYPOINT" <<'PY'
+import sys
+from pathlib import PurePosixPath
+
+def package_safe(label, value):
+  path = PurePosixPath(value)
+  if path.is_absolute() or ".." in path.parts or str(path).startswith("~"):
+    raise SystemExit(f"{label} path is not package-safe")
+  return path
+
+wasm_entrypoint = package_safe("entrypoint", sys.argv[1])
+print(wasm_entrypoint)
+
+ui_entrypoint = sys.argv[2]
+if ui_entrypoint:
+  ui_path = package_safe("ui.entrypoint", ui_entrypoint)
+  ui_root = ui_path.parent
+  print(ui_path if str(ui_root) == "." else ui_root)
+PY
+)
 
 if [[ -f "$APP_DIR/Cargo.toml" ]]; then
   (cd "$APP_DIR" && cargo build --release --target wasm32-wasip1)
@@ -32,20 +54,19 @@ if [[ ! -f "$APP_DIR/$ENTRYPOINT" ]]; then
   exit 1
 fi
 
+if [[ -n "$UI_ENTRYPOINT" && ! -f "$APP_DIR/$UI_ENTRYPOINT" ]]; then
+  echo "Missing UI entrypoint: $APP_DIR/$UI_ENTRYPOINT" >&2
+  exit 1
+fi
+
 OUT_DIR="$ROOT_DIR/packages"
 mkdir -p "$OUT_DIR"
 OUT="$OUT_DIR/$APP_ID-$VERSION.tar.gz"
 
-python3 - "$APP_DIR" "$ENTRYPOINT" <<'PY'
-import sys
-from pathlib import PurePosixPath
-
-entry = PurePosixPath(sys.argv[2])
-if entry.is_absolute() or ".." in entry.parts or str(entry).startswith("~"):
-    raise SystemExit("entrypoint path is not package-safe")
-PY
-
 PACKAGE_FILES=("synapp.app.json" "$ENTRYPOINT")
+if [[ -n "$UI_ENTRYPOINT" ]]; then
+  PACKAGE_FILES+=("${SAFE_PACKAGE_PATHS[1]}")
+fi
 if [[ -f "$APP_DIR/plugin.json" ]]; then
   PACKAGE_FILES+=("plugin.json")
 fi
@@ -54,4 +75,20 @@ if [[ -f "$APP_DIR/README.md" ]]; then
 fi
 
 (cd "$APP_DIR" && tar --sort=name --mtime='UTC 2026-01-01' --owner=0 --group=0 --numeric-owner -czf "$OUT" "${PACKAGE_FILES[@]}")
+python3 - "$OUT" "$ENTRYPOINT" "$UI_ENTRYPOINT" <<'PY'
+import sys
+import tarfile
+
+archive, entrypoint, ui_entrypoint = sys.argv[1:]
+required = [entrypoint]
+if ui_entrypoint:
+  required.append(ui_entrypoint)
+
+with tarfile.open(archive, "r:gz") as tar:
+  names = set(tar.getnames())
+
+missing = [path for path in required if path not in names]
+if missing:
+  raise SystemExit("Package archive is missing required files: " + ", ".join(missing))
+PY
 sha256sum "$OUT"

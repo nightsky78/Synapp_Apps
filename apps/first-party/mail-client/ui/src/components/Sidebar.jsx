@@ -87,10 +87,12 @@ export default function Sidebar() {
           <div className="sidebar__account">
             <span className="sidebar__account-dot" style={{ background: account.color }} />
             <div>
-              <div>{account.display_name}</div>
+              <div>{account.account_label || account.display_name}</div>
               <div className="sidebar__account-email">{account.email_address}</div>
             </div>
+            <span className={`sidebar__health sidebar__health--${account.connection_state || 'unknown'}`} title={account.connection_state || 'unknown'} />
           </div>
+          {account.connection_state === 'receive_only' && <div className="sidebar__notice">Receive-only. Sending is disabled until SMTP passes.</div>}
           <div className="sidebar__divider" />
         </>
       )}
@@ -117,10 +119,18 @@ export default function Sidebar() {
         <>
           <div className="sidebar__divider" />
           <button className="sidebar__action" onClick={() => dispatch({ type: 'SET_SHOW_FOLDER_MANAGER', payload: true })}>
-            ＋ New folder
+            New folder
           </button>
         </>
       )}
+
+      <div className="sidebar__divider" />
+      <div className="sidebar__section-title">User settings</div>
+      <button className="sidebar__action" onClick={() => dispatch({ type: 'SET_SETTINGS_SECTION', payload: 'accounts' })}>Accounts</button>
+      <button className="sidebar__action" onClick={() => dispatch({ type: 'SET_SETTINGS_SECTION', payload: 'identities' })}>Identities and signatures</button>
+      <button className="sidebar__action" onClick={() => dispatch({ type: 'SET_SETTINGS_SECTION', payload: 'preferences' })}>Preferences</button>
+      <button className="sidebar__action" onClick={() => dispatch({ type: 'SET_SETTINGS_SECTION', payload: 'rules' })}>Rules</button>
+      <button className="sidebar__action" onClick={() => dispatch({ type: 'SET_SETTINGS_SECTION', payload: 'agents' })}>Agent permissions</button>
     </aside>
   );
 }

@@ -13,7 +13,7 @@ const ICON_MAP = {
 };
 
 export default function Toolbar() {
-  const { state, openCompose, search, dispatch } = useApp();
+  const { state, openCompose, search, dispatch, loadEmails, loadMailboxes } = useApp();
   const [localQuery, setLocalQuery] = useState(state.searchQuery);
   const inputRef = useRef(null);
 
@@ -33,36 +33,46 @@ export default function Toolbar() {
   }
 
   const mailbox = state.mailboxes.find(m => m.mailbox_id === state.activeMailboxId);
+  const account = state.accounts.find(a => a.account_id === state.activeAccountId);
+  const canCompose = state.accounts.length > 0 && account?.connection_state !== 'receive_only';
+
+  function refreshCurrentView() {
+    if (state.activeAccountId) loadMailboxes(state.activeAccountId);
+    if (state.activeMailboxId) loadEmails(state.activeMailboxId, state.emailPage);
+  }
 
   return (
     <div className="top-bar">
-      {/* Logo */}
       <div className="top-bar__logo">
-        <span style={{ fontSize: 20 }}>✉️</span>
         <span>Synapp Mail</span>
       </div>
 
-      {/* Compose */}
       <button
         className="top-bar__btn top-bar__btn--compose"
         onClick={() => openCompose()}
         title="Compose new email"
         aria-label="Compose new email"
-        disabled={!state.hostCtx || state.accounts.length === 0}
+        disabled={!state.hostCtx || !canCompose}
       >
-        ✏️ New message
+        Compose
       </button>
 
-      {/* Separator */}
-      <div style={{ width: 1, height: 20, background: 'rgba(255,255,255,0.3)', margin: '0 4px' }} />
+      {state.accounts.length > 0 && (
+        <select
+          className="top-bar__account-select"
+          value={state.activeAccountId || ''}
+          onChange={event => dispatch({ type: 'SET_ACTIVE_ACCOUNT', payload: event.target.value })}
+          aria-label="Account scope"
+        >
+          {state.accounts.map(item => <option key={item.account_id} value={item.account_id}>{item.account_label || item.email_address}</option>)}
+        </select>
+      )}
 
-      {/* Search */}
       <div className="top-bar__search">
-        <span className="top-bar__search-icon">🔍</span>
         <input
           ref={inputRef}
           type="search"
-          placeholder="Search mail"
+          placeholder="Search mail, from, subject, attachment"
           value={localQuery}
           onChange={handleSearch}
           aria-label="Search emails"
@@ -73,31 +83,42 @@ export default function Toolbar() {
         )}
       </div>
 
-      <div className="top-bar__spacer" />
+      <div className="top-bar__filter-group" role="group" aria-label="Message filters">
+        {['all', 'unread', 'flagged', 'attachments'].map(filter => (
+          <button
+            key={filter}
+            className={state.activeFilter === filter ? 'top-bar__chip top-bar__chip--active' : 'top-bar__chip'}
+            onClick={() => dispatch({ type: 'SET_FILTER', payload: filter })}
+          >
+            {filter === 'all' ? 'All' : filter[0].toUpperCase() + filter.slice(1)}
+          </button>
+        ))}
+      </div>
 
-      {/* Folder label */}
       {mailbox && !state.searchQuery && (
-        <span style={{ fontSize: 13, color: 'rgba(255,255,255,0.85)', display: 'flex', alignItems: 'center', gap: 4 }}>
-          {ICON_MAP[mailbox.kind] || '📁'} {mailbox.name}
+        <span className="top-bar__folder-label">
+          {ICON_MAP[mailbox.kind] || ''} {mailbox.name}
           {mailbox.unread_count > 0 && (
-            <span style={{ background: 'rgba(255,255,255,0.2)', borderRadius: 10, padding: '0 6px', fontSize: 11, fontWeight: 700 }}>
+            <span className="top-bar__count">
               {mailbox.unread_count}
             </span>
           )}
         </span>
       )}
 
-      {/* Rules */}
+      <span className={`health-dot health-dot--${account?.connection_state || 'unknown'}`} title={`Account health: ${account?.connection_state || 'unknown'}`} aria-label={`Account health: ${account?.connection_state || 'unknown'}`} />
+
+      <button className="top-bar__btn" onClick={refreshCurrentView} aria-label="Refresh mailbox" title="Refresh mailbox">Refresh</button>
+
       <button
         className="top-bar__btn"
-        title="Manage rules"
-        onClick={() => dispatch({ type: 'SET_SHOW_RULES_MANAGER', payload: true })}
-        aria-label="Manage rules"
+        title="Open mail settings"
+        onClick={() => dispatch({ type: 'SET_ROUTE', payload: { route: state.activeRoute === 'settings' ? 'inbox' : 'settings' } })}
+        aria-label={state.activeRoute === 'settings' ? 'Return to inbox' : 'Open mail settings'}
       >
-        ⚙️ Rules
+        {state.activeRoute === 'settings' ? 'Inbox' : 'Settings'}
       </button>
 
-      {/* Permission badge */}
       <PermissionBadge permission={state.hostCtx.permission} />
     </div>
   );
