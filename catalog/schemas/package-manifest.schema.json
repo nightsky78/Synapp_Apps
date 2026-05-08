@@ -35,6 +35,7 @@
       "items": { "$ref": "#/definitions/tool" }
     },
     "ui": { "$ref": "ui-contribution.schema.json" },
+    "ui_schemas": { "$ref": "#/definitions/ui_schemas" },
     "resource_limits": {
       "type": "object",
       "additionalProperties": false,
@@ -67,6 +68,22 @@
         "description": { "type": "string", "minLength": 1, "maxLength": 240 },
         "input_schema": { "type": "object" },
         "output_schema": { "type": "object" }
+      }
+    },
+    "ui_schemas": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/definitions/json_schema" },
+      "properties": {
+        "main": { "$ref": "#/definitions/json_schema" },
+        "settings": { "$ref": "#/definitions/json_schema" }
+      }
+    },
+    "json_schema": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "type": "string" },
+        "properties": { "type": "object" }
       }
     }
   }

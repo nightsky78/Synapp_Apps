@@ -1,5 +1,5 @@
 ---
-name: techwriter
+name: Tech-Writer
 role: Technical Writer
 purpose: Produce developer and operator documentation from validated implementation results.
 inputs:

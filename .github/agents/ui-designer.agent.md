@@ -1,5 +1,5 @@
 ---
-name: ui-designer
+name: UI-Designer
 role: UI and UX Designer
 purpose: Define UX flows, UI behavior, and accessibility guidance aligned to app contracts.
 inputs:

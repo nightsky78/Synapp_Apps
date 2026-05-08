@@ -10,7 +10,7 @@
   "repository_url": "https://github.com/nightsky78/Synapp_Apps/",
   "package_url": "https://github.com/nightsky78/Synapp_Apps/releases/download/mail-client-v2.1.0/mail-client-2.1.0.tar.gz",
   "package_sha256": "7fd4140e267a6d14b5f7623b0b1998a681f8325b1764391279050c759f67a8b7",
-  "manifest_sha256": "1c056d5165dadd3debde00d439d75df86a484e595a952c5af29639dd1086ed90",
+  "manifest_sha256": "0343645d3b6060d6b489424d882fb32ac50a321db497e249b169f8df35da5660",
   "signature": {
     "type": "metadata-only",
     "signer": "synapp-dev-catalog",
@@ -73,6 +73,7 @@
       { "name": "cancel_scheduled_send", "description": "Cancel a scheduled send.", "input_schema": { "type": "object", "properties": { "context": { "type": "object" }, "job_id": { "type": "string" }, "account_id": { "type": "string" }, "draft_id": { "type": "string" } }, "required": ["context", "job_id", "account_id"] }, "output_schema": { "type": "object" } }
     ],
     "ui": {
+      "entrypoint": "ui/dist/index.html",
       "contributions": [
         { "type": "navigation_item", "id": "mail-client.nav", "label": "Mail", "target": "app://mail-client/inbox" },
         {
@@ -135,6 +136,76 @@
           }
         }
       ]
+    },
+    "ui_schemas": {
+      "main": {
+        "type": "object",
+        "title": "Mail Main View",
+        "description": "Schema-driven configuration for the host-rendered Mail main page.",
+        "additionalProperties": false,
+        "properties": {
+          "mailbox_id": { "type": "string", "title": "Mailbox", "default": "inbox", "description": "Mailbox identifier to load first." },
+          "search_query": { "type": "string", "title": "Search", "default": "", "description": "Initial search query for the message list." },
+          "thread_view": { "type": "boolean", "title": "Group by Conversation", "default": true },
+          "focused_inbox": { "type": "boolean", "title": "Focused Inbox", "default": true },
+          "preview_pane": { "type": "string", "title": "Preview Pane", "enum": ["right", "bottom", "off"], "default": "right" },
+          "emails_per_page": { "type": "integer", "title": "Emails Per Page", "enum": [25, 50, 100], "default": 50 }
+        }
+      },
+      "settings": {
+        "type": "object",
+        "title": "Mail Accounts",
+        "x-ui-widget": "account-list-manager",
+        "additionalProperties": false,
+        "properties": {
+          "accounts": {
+            "type": "array",
+            "title": "Configured Accounts",
+            "x-ui-widget": "repeatable-group",
+            "items": {
+              "type": "object",
+              "title": "Mail Account",
+              "additionalProperties": false,
+              "properties": {
+                "account_id": { "type": "string", "x-ui-hidden": true },
+                "display_name": { "type": "string", "title": "Display Name" },
+                "email_address": { "type": "string", "format": "email", "title": "Email Address" },
+                "auth_method": {
+                  "type": "string",
+                  "title": "Authentication",
+                  "enum": ["password", "oauth2_google", "oauth2_microsoft"],
+                  "x-ui-labels": ["Password / App Password", "Google (OAuth2)", "Microsoft (OAuth2)"]
+                },
+                "imap_host": { "type": "string", "title": "IMAP Server", "x-ui-show-when": { "auth_method": "password" } },
+                "imap_port": { "type": "integer", "title": "IMAP Port", "default": 993, "x-ui-show-when": { "auth_method": "password" } },
+                "imap_tls": { "type": "boolean", "title": "IMAP TLS", "default": true, "x-ui-show-when": { "auth_method": "password" } },
+                "smtp_host": { "type": "string", "title": "SMTP Server", "x-ui-show-when": { "auth_method": "password" } },
+                "smtp_port": { "type": "integer", "title": "SMTP Port", "default": 587, "x-ui-show-when": { "auth_method": "password" } },
+                "smtp_tls": { "type": "boolean", "title": "SMTP TLS (STARTTLS)", "default": true, "x-ui-show-when": { "auth_method": "password" } },
+                "oauth2_connected": { "type": "boolean", "title": "Connected", "x-ui-readonly": true, "x-ui-show-when": { "auth_method": ["oauth2_google", "oauth2_microsoft"] } },
+                "sync_interval_minutes": { "type": "integer", "title": "Sync Every (minutes)", "default": 5, "minimum": 1, "maximum": 60 },
+                "signature": { "type": "string", "title": "Email Signature", "x-ui-widget": "rich-text" },
+                "is_default": { "type": "boolean", "title": "Default Account", "default": false },
+                "enabled": { "type": "boolean", "title": "Account Active", "default": true }
+              },
+              "required": ["display_name", "email_address", "auth_method"]
+            }
+          },
+          "general": {
+            "type": "object",
+            "title": "General Settings",
+            "additionalProperties": false,
+            "properties": {
+              "undo_send_delay_seconds": { "type": "integer", "title": "Undo Send Window", "enum": [0, 5, 10, 30], "default": 10 },
+              "preview_pane": { "type": "string", "title": "Preview Pane", "enum": ["right", "bottom", "off"], "default": "right" },
+              "emails_per_page": { "type": "integer", "title": "Emails Per Page", "enum": [25, 50, 100], "default": 50 },
+              "thread_view": { "type": "boolean", "title": "Group by Conversation", "default": true },
+              "focused_inbox": { "type": "boolean", "title": "Focused Inbox", "default": true },
+              "notifications_enabled": { "type": "boolean", "title": "New Mail Notifications", "default": true }
+            }
+          }
+        }
+      }
     },
     "resource_limits": {
       "memory_bytes": 67108864,

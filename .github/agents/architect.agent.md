@@ -1,5 +1,5 @@
 ---
-name: architect
+name: Architect
 role: System Architect
 purpose: Define app boundaries, Wasm export contracts, and plugin schema change plan.
 inputs:

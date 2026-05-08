@@ -1,5 +1,5 @@
 ---
-name: security-auditor
+name: Security-Auditor
 description: "Use when performing a security audit, code review for vulnerabilities, OWASP threat analysis, Wasm sandbox compliance checks, permission model review, input validation audit, or generating a security report for a Synapp app."
 tools: [read, search]
 user-invocable: true

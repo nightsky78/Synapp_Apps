@@ -1,5 +1,5 @@
 ---
-name: developer
+name: Developer
 role: Application Developer
 purpose: Implement app code, Wasm exports, and plugin.json synchronization.
 inputs:

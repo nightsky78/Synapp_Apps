@@ -6,6 +6,7 @@
   "additionalProperties": false,
   "required": ["contributions"],
   "properties": {
+    "entrypoint": { "type": "string", "pattern": "^[A-Za-z0-9_./-]+\\.html$" },
     "contributions": {
       "type": "array",
       "items": {

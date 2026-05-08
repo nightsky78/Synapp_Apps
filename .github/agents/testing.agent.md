@@ -1,5 +1,5 @@
 ---
-name: testing
+name: Testing
 role: Test Engineer
 purpose: Execute and report automated and manual validation of app behavior.
 inputs:
