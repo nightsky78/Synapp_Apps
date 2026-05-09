@@ -67,9 +67,26 @@
     { "name": "cancel_scheduled_send", "description": "Cancel a scheduled send.", "input_schema": { "type": "object", "properties": { "context": { "type": "object" }, "job_id": { "type": "string" }, "account_id": { "type": "string" }, "draft_id": { "type": "string" } }, "required": ["context", "job_id", "account_id"] }, "output_schema": { "type": "object" } }
   ],
   "ui": {
-    "entrypoint": "ui/dist/index.html",
+    "entrypoint": "mail-client.nav",
     "contributions": [
-      { "type": "navigation_item", "id": "mail-client.nav", "label": "Mail", "target": "app://mail-client/inbox" }
+      {
+        "type": "nav_item",
+        "id": "mail-client.nav",
+        "label": "Mail",
+        "target": "app://mail-client/inbox",
+        "page_layout_schema": {
+          "layout": "mail-workspace",
+          "components": [
+            {
+              "type": "MailWorkspace",
+              "id": "mail-client.workspace",
+              "variant": "inbox-first",
+              "required_capabilities": ["mail:read"],
+              "optional_capabilities": ["mail:draft", "mail:send", "mail:organize", "mail:accounts"]
+            }
+          ]
+        }
+      }
     ]
   },
   "resource_limits": {

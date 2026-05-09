@@ -9,8 +9,8 @@
   "category": "productivity",
   "repository_url": "https://github.com/nightsky78/Synapp_Apps/",
   "package_url": "https://github.com/nightsky78/Synapp_Apps/releases/download/mail-client-v2.1.0/mail-client-2.1.0.tar.gz",
-  "package_sha256": "9ce19321a38004d2c3e12d6f4edbecc0bf6efc2fc7b068b6055658af81a9b720",
-  "manifest_sha256": "9d6a192c4e7ccbc88cb0b624a35a799b4bb64f9c69a6be528ab21386af0793cd",
+  "package_sha256": "03303657886709b337937b4e4c7f9cd10e3e13f7aabda10c87da5146ec18840b",
+  "manifest_sha256": "68e033e8dabfedd40615b5d2b2732772e068d6296b9f10c7544ace9ee680f1be",
   "signature": {
     "type": "metadata-only",
     "signer": "synapp-dev-catalog",
@@ -91,9 +91,26 @@
       { "name": "cancel_scheduled_send", "description": "Cancel a scheduled send.", "input_schema": { "type": "object", "properties": { "context": { "type": "object" }, "job_id": { "type": "string" }, "account_id": { "type": "string" }, "draft_id": { "type": "string" } }, "required": ["context", "job_id", "account_id"] }, "output_schema": { "type": "object" } }
     ],
     "ui": {
-      "entrypoint": "ui/dist/index.html",
+      "entrypoint": "mail-client.nav",
       "contributions": [
-        { "type": "navigation_item", "id": "mail-client.nav", "label": "Mail", "target": "app://mail-client/inbox" }
+        {
+          "type": "nav_item",
+          "id": "mail-client.nav",
+          "label": "Mail",
+          "target": "app://mail-client/inbox",
+          "page_layout_schema": {
+            "layout": "mail-workspace",
+            "components": [
+              {
+                "type": "MailWorkspace",
+                "id": "mail-client.workspace",
+                "variant": "inbox-first",
+                "required_capabilities": ["mail:read"],
+                "optional_capabilities": ["mail:draft", "mail:send", "mail:organize", "mail:accounts"]
+              }
+            ]
+          }
+        }
       ]
     },
     "resource_limits": {

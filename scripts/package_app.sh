@@ -54,9 +54,16 @@ if [[ ! -f "$APP_DIR/$ENTRYPOINT" ]]; then
   exit 1
 fi
 
-if [[ -n "$UI_ENTRYPOINT" && ! -f "$APP_DIR/$UI_ENTRYPOINT" ]]; then
-  echo "Missing UI entrypoint: $APP_DIR/$UI_ENTRYPOINT" >&2
-  exit 1
+UI_PACKAGE_PATH=""
+if [[ -n "$UI_ENTRYPOINT" ]]; then
+  if [[ -f "$APP_DIR/$UI_ENTRYPOINT" ]]; then
+    UI_PACKAGE_PATH="${SAFE_PACKAGE_PATHS[1]}"
+  elif [[ -f "$APP_DIR/ui/dist/index.html" ]]; then
+    UI_PACKAGE_PATH="ui/dist"
+  else
+    echo "Missing UI bundle for entrypoint: $UI_ENTRYPOINT" >&2
+    exit 1
+  fi
 fi
 
 OUT_DIR="$ROOT_DIR/packages"
@@ -65,7 +72,7 @@ OUT="$OUT_DIR/$APP_ID-$VERSION.tar.gz"
 
 PACKAGE_FILES=("synapp.app.json" "$ENTRYPOINT")
 if [[ -n "$UI_ENTRYPOINT" ]]; then
-  PACKAGE_FILES+=("${SAFE_PACKAGE_PATHS[1]}")
+  PACKAGE_FILES+=("$UI_PACKAGE_PATH")
 fi
 if [[ -f "$APP_DIR/plugin.json" ]]; then
   PACKAGE_FILES+=("plugin.json")
@@ -75,14 +82,16 @@ if [[ -f "$APP_DIR/README.md" ]]; then
 fi
 
 (cd "$APP_DIR" && tar --sort=name --mtime='UTC 2026-01-01' --owner=0 --group=0 --numeric-owner -czf "$OUT" "${PACKAGE_FILES[@]}")
-python3 - "$OUT" "$ENTRYPOINT" "$UI_ENTRYPOINT" <<'PY'
+python3 - "$OUT" "$ENTRYPOINT" "$UI_ENTRYPOINT" "$UI_PACKAGE_PATH" <<'PY'
 import sys
 import tarfile
 
-archive, entrypoint, ui_entrypoint = sys.argv[1:]
+archive, entrypoint, ui_entrypoint, ui_package_path = sys.argv[1:]
 required = [entrypoint]
-if ui_entrypoint:
+if ui_entrypoint and ui_package_path == ui_entrypoint:
   required.append(ui_entrypoint)
+elif ui_entrypoint and ui_package_path:
+  required.append(ui_package_path.rstrip('/') + '/index.html')
 
 with tarfile.open(archive, "r:gz") as tar:
   names = set(tar.getnames())
