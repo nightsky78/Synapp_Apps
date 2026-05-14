@@ -25,6 +25,23 @@ type AppCatalogEntry = {
   verification_status: 'pending' | 'passed' | 'failed' | 'unavailable';
 };
 
+type InstalledApp = {
+  app_id: string;
+  name: string;
+  version: string;
+  enabled: boolean;
+  publisher?: string;
+  update_available: boolean;
+  latest_version?: string;
+  capabilities: AppCatalogEntry['capabilities'];
+};
+
+type MockAppPlatformController = {
+  installCalls: string[];
+  uninstallCalls: string[];
+  grantPayloads: Array<{ app_id: string; capabilities: string[] }>;
+};
+
 type CatalogEntryFile = {
   app_id: string;
   name: string;
@@ -80,6 +97,72 @@ test.describe('Synapp Apps app-platform catalog visibility', () => {
       await expect(card).toContainText(`v${app.version}`);
     }
   });
+
+  test('TC-SA-CAT-003: Calendar Management install, capability grants, uninstall, and reinstall lifecycle', async ({ page }) => {
+    const catalog = await loadCatalogEntries();
+    const calendar = findCatalogApp(catalog, 'calendar-management');
+    const platform = await mockAppPlatform(page, catalog);
+
+    await page.goto('/admin');
+    await page.getByTestId('admin-nav-app-platform').click();
+
+    await expect(page.getByTestId('app-card-calendar-management')).toContainText(calendar.name);
+    await page.getByTestId('app-install-button-calendar-management').click();
+    await expect(page.getByTestId('app-install-modal')).toContainText('Read calendars');
+    await page.getByTestId('app-install-confirm').click();
+
+    await expect(page.getByTestId('installed-app-row-calendar-management')).toContainText(calendar.name);
+    expect(platform.installCalls).toEqual(['calendar-management']);
+
+    await page.getByTestId('app-review-button-calendar-management').click();
+    await expect(page.getByTestId('app-capability-locked-calendar:read')).toBeVisible();
+    await expect(page.getByTestId('app-capability-toggle-calendar:write')).not.toBeChecked();
+    await expect(page.getByTestId('app-capability-toggle-calendar:settings')).not.toBeChecked();
+    await expect(page.getByTestId('app-capability-save')).toBeDisabled();
+
+    await page.getByTestId('app-capability-toggle-calendar:write').check();
+    await page.getByTestId('app-capability-toggle-calendar:settings').check();
+    await page.getByTestId('app-capability-save').click();
+
+    await expect(page.getByTestId('app-capability-save')).toBeDisabled();
+    expect(platform.grantPayloads.at(-1)).toEqual({
+      app_id: 'calendar-management',
+      capabilities: ['calendar:read', 'calendar:write', 'calendar:settings'],
+    });
+    await expect(page.getByTestId('app-capability-toggle-calendar:write')).toBeChecked();
+    await expect(page.getByTestId('app-capability-toggle-calendar:settings')).toBeChecked();
+
+    await page.getByTestId('app-capability-toggle-calendar:settings').uncheck();
+    await page.getByTestId('app-capability-save').click();
+
+    await expect(page.getByTestId('app-capability-save')).toBeDisabled();
+    expect(platform.grantPayloads.at(-1)).toEqual({
+      app_id: 'calendar-management',
+      capabilities: ['calendar:read', 'calendar:write'],
+    });
+    await expect(page.getByTestId('app-capability-toggle-calendar:write')).toBeChecked();
+    await expect(page.getByTestId('app-capability-toggle-calendar:settings')).not.toBeChecked();
+
+    await page.getByTestId('app-platform-tab-installed').click();
+    await page.getByTestId('app-uninstall-button-calendar-management').click();
+    await expect(page.getByTestId('app-uninstall-modal')).toContainText('Uninstall Calendar Management');
+    await page.getByTestId('app-uninstall-confirm').click();
+
+    await expect(page.getByTestId('installed-app-row-calendar-management')).toHaveCount(0);
+    await expect(page.getByTestId('app-install-button-calendar-management')).toBeVisible();
+    expect(platform.uninstallCalls).toEqual(['calendar-management']);
+
+    await page.getByTestId('app-install-button-calendar-management').click();
+    await page.getByTestId('app-install-confirm').click();
+
+    await expect(page.getByTestId('installed-app-row-calendar-management')).toContainText(calendar.name);
+    expect(platform.installCalls).toEqual(['calendar-management', 'calendar-management']);
+
+    await page.getByTestId('app-review-button-calendar-management').click();
+    await expect(page.getByTestId('app-capability-locked-calendar:read')).toBeVisible();
+    await expect(page.getByTestId('app-capability-toggle-calendar:write')).not.toBeChecked();
+    await expect(page.getByTestId('app-capability-toggle-calendar:settings')).not.toBeChecked();
+  });
 });
 
 async function loadFirstPartyApps(): Promise<PackageManifest[]> {
@@ -125,13 +208,70 @@ function toAppCatalogEntry(entry: CatalogEntryFile): AppCatalogEntry {
   };
 }
 
+function findCatalogApp(catalog: AppCatalogEntry[], appId: string): AppCatalogEntry {
+  const app = catalog.find((candidate) => candidate.app_id === appId);
+  if (!app) throw new Error(`${appId} is missing from catalog/index.v1.json`);
+  return app;
+}
+
 function verificationStatus(status: string | undefined): AppCatalogEntry['verification_status'] {
   if (status === 'verified') return 'passed';
   if (status === 'unverified') return 'failed';
   return 'unavailable';
 }
 
-async function mockAppPlatform(page: Page, catalog: AppCatalogEntry[]) {
+async function mockAppPlatform(page: Page, catalog: AppCatalogEntry[]): Promise<MockAppPlatformController> {
+  const installedIds = new Set<string>();
+  const enabledIds = new Set<string>();
+  const optionalGrants = new Map<string, Set<string>>();
+  const controller: MockAppPlatformController = {
+    installCalls: [],
+    uninstallCalls: [],
+    grantPayloads: [],
+  };
+
+  const appById = new Map(catalog.map((app) => [app.app_id, app]));
+
+  function grantedCapabilities(app: AppCatalogEntry): AppCatalogEntry['capabilities'] {
+    const grants = optionalGrants.get(app.app_id) ?? new Set<string>();
+    return app.capabilities.map((capability) => ({
+      ...capability,
+      granted: capability.required || grants.has(capability.capability),
+    }));
+  }
+
+  function catalogPayload(): AppCatalogEntry[] {
+    return catalog.map((app) => ({
+      ...app,
+      installed: installedIds.has(app.app_id),
+      enabled: enabledIds.has(app.app_id),
+      capabilities: grantedCapabilities(app),
+    }));
+  }
+
+  function installedPayload(): InstalledApp[] {
+    return catalog
+      .filter((app) => installedIds.has(app.app_id))
+      .map((app) => ({
+        app_id: app.app_id,
+        name: app.name,
+        version: app.version,
+        enabled: enabledIds.has(app.app_id),
+        publisher: app.publisher,
+        update_available: false,
+        capabilities: grantedCapabilities(app),
+      }));
+  }
+
+  function reviewPayload(app: AppCatalogEntry) {
+    return {
+      app_id: app.app_id,
+      app_name: app.name,
+      version: app.version,
+      capabilities: grantedCapabilities(app),
+    };
+  }
+
   await page.route('**/api/auth/refresh', async (route) => {
     await route.fulfill({
       contentType: 'application/json',
@@ -160,34 +300,82 @@ async function mockAppPlatform(page: Page, catalog: AppCatalogEntry[]) {
   });
 
   await page.route('**/api/app-catalog/v1/apps', async (route) => {
-    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ apps: catalog }) });
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ apps: catalogPayload() }) });
   });
 
   await page.route('**/api/admin/apps/installed', async (route) => {
-    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ apps: [] }) });
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ apps: installedPayload() }) });
   });
 
   await page.route('**/api/v1/apps/enabled', async (route) => {
-    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ apps: [] }) });
+    const apps = catalogPayload().filter((app) => app.installed && app.enabled);
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ apps }) });
   });
 
   await page.route('**/api/admin/apps/*/capability-review', async (route) => {
     const appId = appIdFromAdminAppsUrl(route.request().url());
-    const app = catalog.find((candidate) => candidate.app_id === appId);
+    const app = appById.get(appId);
     if (!app) {
       await route.fulfill({ status: 404, body: 'not found' });
       return;
     }
 
-    await route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify({
-        app_id: app.app_id,
-        app_name: app.name,
-        version: app.version,
-        capabilities: app.capabilities,
-      }),
-    });
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify(reviewPayload(app)) });
+  });
+
+  await page.route('**/api/admin/apps/*/capability-grants', async (route) => {
+    const appId = appIdFromAdminAppsUrl(route.request().url());
+    const app = appById.get(appId);
+    if (!app) {
+      await route.fulfill({ status: 404, body: 'not found' });
+      return;
+    }
+
+    const body = route.request().postDataJSON() as { capabilities: string[] };
+    const knownCapabilities = new Set(app.capabilities.map((capability) => capability.capability));
+    const requiredCapabilities = app.capabilities.filter((capability) => capability.required).map((capability) => capability.capability);
+    const hasUnknownCapability = body.capabilities.some((capability) => !knownCapabilities.has(capability));
+    const hasAllRequiredCapabilities = requiredCapabilities.every((capability) => body.capabilities.includes(capability));
+
+    if (hasUnknownCapability || !hasAllRequiredCapabilities) {
+      await route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: 'invalid capability grant request' }) });
+      return;
+    }
+
+    const optional = new Set(body.capabilities.filter((capability) => !requiredCapabilities.includes(capability)));
+    optionalGrants.set(appId, optional);
+    controller.grantPayloads.push({ app_id: appId, capabilities: body.capabilities });
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify(reviewPayload(app)) });
+  });
+
+  await page.route('**/api/admin/apps/*/install', async (route) => {
+    const appId = appIdFromAdminAppsUrl(route.request().url());
+    const app = appById.get(appId);
+    if (!app) {
+      await route.fulfill({ status: 404, body: 'not found' });
+      return;
+    }
+
+    controller.installCalls.push(appId);
+    installedIds.add(appId);
+    enabledIds.add(appId);
+    optionalGrants.set(appId, new Set());
+    const installedApp = installedPayload().find((candidate) => candidate.app_id === appId);
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ app: installedApp }) });
+  });
+
+  await page.route('**/api/admin/apps/*', async (route) => {
+    if (route.request().method() !== 'DELETE') {
+      await route.fallback();
+      return;
+    }
+
+    const appId = appIdFromAdminAppsUrl(route.request().url());
+    controller.uninstallCalls.push(appId);
+    installedIds.delete(appId);
+    enabledIds.delete(appId);
+    optionalGrants.delete(appId);
+    await route.fulfill({ status: 204, body: '' });
   });
 
   await page.route('**/api/admin/users', async (route) => {
@@ -244,6 +432,8 @@ async function mockAppPlatform(page: Page, catalog: AppCatalogEntry[]) {
   await page.route('**/api/v1/events/stream?*', async (route) => {
     await route.fulfill({ status: 200, contentType: 'text/event-stream', body: '' });
   });
+
+  return controller;
 }
 
 async function readJson<T>(filePath: string): Promise<T> {
