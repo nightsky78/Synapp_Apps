@@ -2227,6 +2227,8 @@ fn handle_mark_read(
     request: MarkReadRequest,
 ) -> Result<OperationResponse<MutationAck>, ErrorResponse> {
     validate_message_ids(&request.email_ids)?;
+    validate_optional_host_id("account_id", &request.account_id)?;
+    validate_optional_host_id("mailbox_id", &request.mailbox_id)?;
     let data = MutationAck {
         mutation: if request.read { "mark_read" } else { "mark_unread" },
         resource_ids: request.email_ids.clone(),
@@ -2259,6 +2261,7 @@ fn handle_flag_email(
     request: FlagEmailRequest,
 ) -> Result<OperationResponse<MutationAck>, ErrorResponse> {
     validate_message_ids(&request.email_ids)?;
+    validate_optional_host_id("account_id", &request.account_id)?;
     let data = MutationAck {
         mutation: if request.flagged { "flag_email" } else { "unflag_email" },
         resource_ids: request.email_ids.clone(),
@@ -2364,6 +2367,7 @@ fn handle_discard_draft(
     request: DiscardDraftRequest,
 ) -> Result<OperationResponse<MutationAck>, ErrorResponse> {
     validate_host_id("draft_id", &request.draft_id)?;
+    validate_optional_host_id("account_id", &request.account_id)?;
     let data = MutationAck {
         mutation: "discard_draft",
         resource_ids: vec![request.draft_id.clone()],
@@ -2574,6 +2578,7 @@ fn handle_move_email(
     request: MoveEmailRequest,
 ) -> Result<OperationResponse<MutationAck>, ErrorResponse> {
     validate_message_ids(&request.email_ids)?;
+    validate_optional_host_id("account_id", &request.account_id)?;
     validate_host_id("destination_mailbox_id", &request.destination_mailbox_id)?;
     let data = MutationAck {
         mutation: "move_email",
@@ -2606,6 +2611,7 @@ fn handle_delete_email(
     request: DeleteEmailRequest,
 ) -> Result<OperationResponse<MutationAck>, ErrorResponse> {
     validate_message_ids(&request.email_ids)?;
+    validate_optional_host_id("account_id", &request.account_id)?;
     let data = MutationAck {
         mutation: if request.permanent { "delete_email_permanent" } else { "delete_email" },
         resource_ids: request.email_ids.clone(),
@@ -2646,6 +2652,7 @@ fn handle_archive_email(
     request: ArchiveEmailRequest,
 ) -> Result<OperationResponse<MutationAck>, ErrorResponse> {
     validate_message_ids(&request.email_ids)?;
+    validate_optional_host_id("account_id", &request.account_id)?;
     let data = MutationAck {
         mutation: "archive_email",
         resource_ids: request.email_ids.clone(),
@@ -2677,6 +2684,7 @@ fn handle_create_folder(
     request: CreateFolderRequest,
 ) -> Result<OperationResponse<FolderMutationData>, ErrorResponse> {
     validate_host_id("account_id", &request.account_id)?;
+    validate_optional_host_id("parent_mailbox_id", &request.parent_mailbox_id)?;
     ensure_host_string("name", &request.name, MAX_FOLDER_NAME_LENGTH)?;
     if request.name.len() > MAX_FOLDER_NAME_LENGTH {
         return Err(ErrorResponse::new(
@@ -3598,7 +3606,8 @@ fn handle_save_identity(request: SaveIdentityRequest) -> Result<OperationRespons
 }
 
 fn handle_delete_identity(request: DeleteIdentityRequest) -> Result<OperationResponse<IdentityDeleteData>, ErrorResponse> {
-    ensure_non_empty("identity_id", &request.identity_id)?;
+    validate_host_id("identity_id", &request.identity_id)?;
+    validate_optional_host_id("account_id", &request.account_id)?;
     require_effects(&request.context, &[EFFECT_ACCOUNT_CREDENTIAL_WRITE, EFFECT_MAIL_STORE_WRITE])?;
     let host_effects = vec![
         host_effect(&request.context, "delete_identity", EFFECT_ACCOUNT_CREDENTIAL_WRITE, "Remove send-as authorization for an identity", json!({ "user_id": request.context.user_id, "identity_id": request.identity_id, "account_id": request.account_id, "force": request.force })),
@@ -3618,7 +3627,8 @@ fn handle_save_signature(request: SaveSignatureRequest) -> Result<OperationRespo
 }
 
 fn handle_delete_signature(request: DeleteSignatureRequest) -> Result<OperationResponse<SignatureDeleteData>, ErrorResponse> {
-    ensure_non_empty("signature_id", &request.signature_id)?;
+    validate_host_id("signature_id", &request.signature_id)?;
+    validate_optional_host_id("account_id", &request.account_id)?;
     require_effects(&request.context, &[EFFECT_MAIL_STORE_WRITE, EFFECT_MAIL_STORE_DELETE])?;
     let host_effects = vec![
         host_effect(&request.context, "delete_signature", EFFECT_MAIL_STORE_WRITE, "Clear identity defaults that reference a deleted signature", json!({ "user_id": request.context.user_id, "signature_id": request.signature_id, "account_id": request.account_id })),
@@ -4287,6 +4297,39 @@ mod tests {
             }),
         );
         assert_eq!(rule_response["err"]["code"], "InvalidInput");
+
+        let mark_response = call_export(
+            mark_read,
+            json!({
+                "context": context("read", &[EFFECT_MAIL_STORE_WRITE]),
+                "email_ids": ["email-1"],
+                "read": true,
+                "account_id": "acc 1"
+            }),
+        );
+        assert_eq!(mark_response["err"]["code"], "InvalidInput");
+
+        let flag_response = call_export(
+            flag_email,
+            json!({
+                "context": context("organize", &[EFFECT_MAIL_STORE_WRITE]),
+                "email_ids": ["email-1"],
+                "flagged": true,
+                "account_id": "acc\n1"
+            }),
+        );
+        assert_eq!(flag_response["err"]["code"], "InvalidInput");
+
+        let move_response = call_export(
+            move_email,
+            json!({
+                "context": context("organize", &[EFFECT_MAIL_STORE_WRITE]),
+                "email_ids": ["email-1"],
+                "destination_mailbox_id": "archive",
+                "account_id": "acc#1"
+            }),
+        );
+        assert_eq!(move_response["err"]["code"], "InvalidInput");
     }
 
     #[test]

@@ -205,7 +205,7 @@ export default function ComposePane() {
 
   async function handleDiscard() {
     if (draftId) {
-      try { await invoke('discard_draft', { draft_id: draftId }); } catch (_) { /* ignore */ }
+      try { await invoke('discard_draft', { draft_id: draftId, account_id: fromAccountId || state.activeAccountId }); } catch (_) { /* ignore */ }
     }
     closeCompose();
   }

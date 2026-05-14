@@ -41,7 +41,7 @@ export default function Sidebar() {
                 const newName = window.prompt('Rename folder:', mailbox.name);
                 if (!newName || newName === mailbox.name) return;
                 try {
-                  await invoke('rename_folder', { mailbox_id: mailbox.mailbox_id, new_name: newName });
+                  await invoke('rename_folder', { account_id: state.activeAccountId, mailbox_id: mailbox.mailbox_id, new_name: newName });
                   loadMailboxes(state.activeAccountId);
                   toast('Folder renamed', 'success');
                 } catch (err) {
@@ -56,7 +56,7 @@ export default function Sidebar() {
                 e.stopPropagation();
                 if (!window.confirm(`Delete folder "${mailbox.name}"? All emails will be moved to Trash.`)) return;
                 try {
-                  await invoke('delete_folder', { mailbox_id: mailbox.mailbox_id });
+                  await invoke('delete_folder', { account_id: state.activeAccountId, mailbox_id: mailbox.mailbox_id });
                   loadMailboxes(state.activeAccountId);
                   toast('Folder deleted', 'success');
                 } catch (err) {

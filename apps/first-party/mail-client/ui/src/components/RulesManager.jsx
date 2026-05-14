@@ -21,22 +21,33 @@ export default function RulesManager({ embedded = false }) {
     dispatch({ type: 'SET_SHOW_RULES_MANAGER', payload: false });
   }
 
+  function buildRulePayload() {
+    const actionType = form.action === 'move' ? 'move_to' : form.action;
+    return {
+      rule_id: `rule_${Date.now()}`,
+      name: form.name.trim(),
+      enabled: true,
+      stop_processing: false,
+      priority: rules.length + 1,
+      conditions: [{ field: form.condition_field, operator: form.condition_op, value: form.condition_value.trim() }],
+      actions: [{ action_type: actionType, value: actionType === 'move_to' ? form.action_mailbox_id : true }],
+    };
+  }
+
   async function handleCreate() {
     if (!form.name.trim() || !form.condition_value.trim()) {
       toast('Rule name and condition value are required', 'error');
+      return;
+    }
+    if (form.action === 'move' && !form.action_mailbox_id) {
+      toast('Choose a target folder for move rules', 'error');
       return;
     }
     setCreating(true);
     try {
       await invoke('create_rule', {
         account_id: state.activeAccountId,
-        rule: {
-          name: form.name.trim(),
-          enabled: true,
-          conditions: [{ field: form.condition_field, op: form.condition_op, value: form.condition_value.trim() }],
-          actions: [{ type: form.action, mailbox_id: form.action_mailbox_id || undefined }],
-          stop_processing: false,
-        },
+        rule: buildRulePayload(),
       });
       toast('Rule created', 'success');
       // Reload rules
@@ -52,7 +63,7 @@ export default function RulesManager({ embedded = false }) {
 
   async function handleDelete(ruleId) {
     try {
-      await invoke('delete_rule', { rule_id: ruleId });
+      await invoke('delete_rule', { account_id: state.activeAccountId, rule_id: ruleId });
       setRules(rules.filter(r => r.rule_id !== ruleId));
       toast('Rule deleted', 'success');
     } catch (err) {
@@ -76,7 +87,7 @@ export default function RulesManager({ embedded = false }) {
                   <div>
                     <div className="rule-item__name">{r.name}</div>
                     <div style={{ fontSize: 11, color: '#605e5c', marginTop: 2 }}>
-                      If {r.conditions?.[0]?.field} {r.conditions?.[0]?.op} "{r.conditions?.[0]?.value}" → {r.actions?.[0]?.type}
+                      If {r.conditions?.[0]?.field} {r.conditions?.[0]?.operator} "{r.conditions?.[0]?.value}" → {r.actions?.[0]?.action_type}
                     </div>
                   </div>
                   <span className={`rule-item__enabled`} style={{ color: r.enabled ? '#107c10' : '#a19f9d' }}>{r.enabled ? 'Active' : 'Inactive'}</span>

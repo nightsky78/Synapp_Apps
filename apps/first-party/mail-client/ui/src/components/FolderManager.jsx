@@ -63,7 +63,7 @@ export default function FolderManager() {
                       onClick={async () => {
                         if (!window.confirm(`Delete "${m.name}"?`)) return;
                         try {
-                          await invoke('delete_folder', { mailbox_id: m.mailbox_id });
+                          await invoke('delete_folder', { account_id: state.activeAccountId, mailbox_id: m.mailbox_id });
                           loadMailboxes(state.activeAccountId);
                           toast('Folder deleted', 'success');
                         } catch (err) {
