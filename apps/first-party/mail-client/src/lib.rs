@@ -4408,4 +4408,990 @@ mod tests {
         assert_eq!(response["ok"]["operation"], "read_emails");
         assert_eq!(response["ok"]["data"]["page"]["limit"], 25);
     }
+
+    // ─── Read Workflows ───────────────────────────────────────────────────────
+    // Intent: user can open the app and see their accounts, folders, and mail.
+
+    #[test]
+    fn list_accounts_signals_host_fetch_so_account_switcher_can_populate() {
+        // Result: account switcher and sidebar show the user's configured accounts.
+        let response = call_export(
+            list_accounts,
+            json!({
+                "context": context("read", &[EFFECT_ACCOUNT_CREDENTIAL_READ])
+            }),
+        );
+
+        assert_eq!(response["ok"]["operation"], "list_accounts");
+        assert_eq!(response["ok"]["status"], "accepted");
+        // No snapshot supplied → host refresh required so the UI shows real accounts.
+        let effects = response["ok"]["host_effects"].as_array().unwrap();
+        assert!(effects.iter().any(|e| e["effect"] == EFFECT_ACCOUNT_CREDENTIAL_READ));
+    }
+
+    #[test]
+    fn get_account_status_triggers_imap_sync_check_for_health_dot() {
+        // Result: the toolbar health dot and nav badge reflect live account state.
+        let response = call_export(
+            get_account_status,
+            json!({
+                "context": context("read", &[EFFECT_ACCOUNT_CREDENTIAL_READ, EFFECT_IMAP_SYNC]),
+                "account_id": "acc-1"
+            }),
+        );
+
+        assert_eq!(response["ok"]["operation"], "get_account_status");
+        let effects = response["ok"]["host_effects"].as_array().unwrap();
+        assert!(effects.iter().any(|e| e["effect"] == EFFECT_IMAP_SYNC));
+    }
+
+    #[test]
+    fn list_mailboxes_signals_host_fetch_so_sidebar_can_show_folder_tree() {
+        // Result: left sidebar shows all folders including custom ones with counts.
+        let response = call_export(
+            list_mailboxes,
+            json!({
+                "context": context("read", &[EFFECT_ACCOUNT_CREDENTIAL_READ, EFFECT_IMAP_FETCH]),
+                "account_id": "acc-1"
+            }),
+        );
+
+        assert_eq!(response["ok"]["operation"], "list_mailboxes");
+        let effects = response["ok"]["host_effects"].as_array().unwrap();
+        assert!(!effects.is_empty(), "host refresh effect must be planned when no snapshot supplied");
+    }
+
+    #[test]
+    fn read_emails_without_snapshot_signals_host_refresh_for_inbox() {
+        // Result: message list renders with a loading skeleton while host fetches real mail.
+        let response = call_export(
+            read_emails,
+            json!({
+                "context": context("read", &[EFFECT_ACCOUNT_CREDENTIAL_READ, EFFECT_IMAP_FETCH]),
+                "mailbox_id": "inbox"
+            }),
+        );
+
+        assert_eq!(response["ok"]["operation"], "read_emails");
+        assert_eq!(response["ok"]["data"]["needs_host_refresh"], true);
+        let effects = response["ok"]["host_effects"].as_array().unwrap();
+        assert!(effects.iter().any(|e| e["effect"] == EFFECT_IMAP_FETCH));
+    }
+
+    #[test]
+    fn get_email_plans_read_and_mark_read_effects_so_message_opens_unread_state_clears() {
+        // Result: opening a message body loads content and automatically clears the unread badge.
+        let response = call_export(
+            get_email,
+            json!({
+                "context": context("read", &[EFFECT_ACCOUNT_CREDENTIAL_READ, EFFECT_IMAP_FETCH, EFFECT_MAIL_STORE_WRITE]),
+                "email_id": "email-42",
+                "account_id": "acc-1",
+                "mark_read": true
+            }),
+        );
+
+        assert_eq!(response["ok"]["operation"], "get_email");
+        let effects = response["ok"]["host_effects"].as_array().unwrap();
+        let effect_names: Vec<&str> = effects.iter().map(|e| e["effect"].as_str().unwrap()).collect();
+        assert!(effect_names.contains(&EFFECT_IMAP_FETCH));
+        assert!(effect_names.contains(&EFFECT_MAIL_STORE_WRITE),
+            "mark-read write effect must be present so unread count reconciles after open");
+    }
+
+    #[test]
+    fn get_thread_returns_conversation_context_for_reading_pane() {
+        // Result: reading pane shows the full conversation thread so user can follow reply chains.
+        let response = call_export(
+            get_thread,
+            json!({
+                "context": context("read", &[EFFECT_ACCOUNT_CREDENTIAL_READ, EFFECT_IMAP_FETCH]),
+                "thread_id": "thread-7",
+                "account_id": "acc-1"
+            }),
+        );
+
+        assert_eq!(response["ok"]["operation"], "get_thread");
+        assert_eq!(response["ok"]["data"]["thread_id"], "thread-7");
+        assert_eq!(response["ok"]["data"]["needs_host_refresh"], true);
+    }
+
+    #[test]
+    fn mark_read_plans_bulk_write_effect_so_read_state_persists_after_bulk_action() {
+        // Result: marking multiple messages read updates the sidebar unread counts.
+        let response = call_export(
+            mark_read,
+            json!({
+                "context": context("read", &[EFFECT_MAIL_STORE_WRITE]),
+                "email_ids": ["email-1", "email-2", "email-3"],
+                "read": true,
+                "account_id": "acc-1",
+                "mailbox_id": "inbox"
+            }),
+        );
+
+        assert_eq!(response["ok"]["operation"], "mark_read");
+        assert_eq!(response["ok"]["data"]["mutation"], "mark_read");
+        assert_eq!(response["ok"]["data"]["resource_ids"].as_array().unwrap().len(), 3);
+        let effects = response["ok"]["host_effects"].as_array().unwrap();
+        assert!(effects.iter().any(|e| e["effect"] == EFFECT_MAIL_STORE_WRITE));
+    }
+
+    #[test]
+    fn search_emails_plans_imap_fetch_so_results_populate_search_view() {
+        // Result: search view shows matched messages from host with query and filters visible.
+        let response = call_export(
+            search_emails,
+            json!({
+                "context": context("read", &[EFFECT_ACCOUNT_CREDENTIAL_READ, EFFECT_IMAP_FETCH]),
+                "query": "budget review",
+                "pagination": { "offset": 0, "limit": 50 }
+            }),
+        );
+
+        assert_eq!(response["ok"]["operation"], "search_emails");
+        assert_eq!(response["ok"]["data"]["query"], "budget review");
+        assert_eq!(response["ok"]["data"]["needs_host_refresh"], true);
+        let effects = response["ok"]["host_effects"].as_array().unwrap();
+        assert!(effects.iter().any(|e| e["effect"] == EFFECT_IMAP_FETCH));
+    }
+
+    #[test]
+    fn get_unread_count_plans_imap_fetch_so_folder_badges_show_live_counts() {
+        // Result: every folder in the sidebar shows its correct unread count.
+        let response = call_export(
+            get_unread_count,
+            json!({
+                "context": context("read", &[EFFECT_ACCOUNT_CREDENTIAL_READ, EFFECT_IMAP_FETCH]),
+                "account_id": "acc-1"
+            }),
+        );
+
+        assert_eq!(response["ok"]["operation"], "get_unread_count");
+        assert_eq!(response["ok"]["data"]["needs_host_refresh"], true);
+    }
+
+    // ─── Compose and Send ─────────────────────────────────────────────────────
+    // Intent: user can compose, save, send, reply, and forward mail.
+
+    #[test]
+    fn draft_email_returns_suggested_draft_id_so_compose_autosave_can_update_same_draft() {
+        // Result: compose pane autosaves every 10 s and updates the same draft without creating duplicates.
+        let response = call_export(
+            draft_email,
+            json!({
+                "context": context("draft", &[EFFECT_MAIL_STORE_WRITE]),
+                "draft": {
+                    "account_id": "acc-1",
+                    "to": [{ "email": "alice@example.com", "display_name": "Alice" }],
+                    "subject": "Hello",
+                    "body_text": "Hi there"
+                }
+            }),
+        );
+
+        assert_eq!(response["ok"]["operation"], "draft_email");
+        let draft_id = response["ok"]["data"]["suggested_draft_id"].as_str().unwrap();
+        assert!(!draft_id.is_empty(), "compose autosave requires a non-empty suggested draft id");
+        let effects = response["ok"]["host_effects"].as_array().unwrap();
+        assert!(effects.iter().any(|e| e["effect"] == EFFECT_MAIL_STORE_WRITE));
+    }
+
+    #[test]
+    fn update_draft_preserves_existing_draft_id_so_autosave_does_not_create_duplicate() {
+        // Result: editing a saved draft updates the same draft, not a new one.
+        let response = call_export(
+            update_draft,
+            json!({
+                "context": context("draft", &[EFFECT_MAIL_STORE_WRITE]),
+                "draft": {
+                    "draft_id": "draft-existing-001",
+                    "account_id": "acc-1",
+                    "to": [{ "email": "alice@example.com" }],
+                    "subject": "Updated subject",
+                    "body_text": "Updated body"
+                }
+            }),
+        );
+
+        assert_eq!(response["ok"]["operation"], "update_draft");
+        assert_eq!(response["ok"]["data"]["suggested_draft_id"], "draft-existing-001");
+    }
+
+    #[test]
+    fn discard_draft_plans_mail_store_delete_so_compose_closes_cleanly() {
+        // Result: closing compose with discard removes the draft from Drafts folder.
+        let response = call_export(
+            discard_draft,
+            json!({
+                "context": context("draft", &[EFFECT_MAIL_STORE_DELETE]),
+                "draft_id": "draft-existing-001",
+                "account_id": "acc-1"
+            }),
+        );
+
+        assert_eq!(response["ok"]["operation"], "discard_draft");
+        assert_eq!(response["ok"]["data"]["mutation"], "discard_draft");
+        let effects = response["ok"]["host_effects"].as_array().unwrap();
+        assert!(effects.iter().any(|e| e["effect"] == EFFECT_MAIL_STORE_DELETE));
+    }
+
+    #[test]
+    fn send_email_returns_undo_window_so_ui_can_show_undo_send_timer() {
+        // Result: after sending, the UI shows an undo banner for the configured window.
+        let response = call_export(
+            send_email,
+            json!({
+                "context": context("send", &[EFFECT_MAIL_STORE_WRITE, EFFECT_SMTP_SEND]),
+                "draft_id": "draft-ready",
+                "account_id": "acc-1",
+                "undo_window_seconds": 10,
+                "notify": false
+            }),
+        );
+
+        assert_eq!(response["ok"]["operation"], "send_email");
+        let undo = response["ok"]["data"]["undo_window_seconds"].as_u64().unwrap();
+        assert!(undo > 0, "undo window must be non-zero so the UI can show the undo timer");
+        let effects = response["ok"]["host_effects"].as_array().unwrap();
+        let effect_names: Vec<&str> = effects.iter().map(|e| e["effect"].as_str().unwrap()).collect();
+        assert!(effect_names.contains(&EFFECT_SMTP_SEND));
+        assert!(effect_names.contains(&EFFECT_MAIL_STORE_WRITE));
+    }
+
+    #[test]
+    fn send_email_with_notify_adds_notification_effect_for_send_confirmation_toast() {
+        // Result: sending with notify=true triggers a host notification so the UI can show "Sent".
+        let response = call_export(
+            send_email,
+            json!({
+                "context": context("send", &[EFFECT_MAIL_STORE_WRITE, EFFECT_SMTP_SEND, EFFECT_NOTIFY_USER]),
+                "draft_id": "draft-notify",
+                "account_id": "acc-1",
+                "notify": true
+            }),
+        );
+
+        assert_eq!(response["ok"]["operation"], "send_email");
+        let effects = response["ok"]["host_effects"].as_array().unwrap();
+        assert!(effects.iter().any(|e| e["effect"] == EFFECT_NOTIFY_USER),
+            "notify=true must include a NotifyUser effect for the send confirmation toast");
+    }
+
+    #[test]
+    fn reply_email_plans_source_read_then_send_so_thread_context_is_preserved() {
+        // Result: reply loads original message headers so In-Reply-To and threading stay consistent.
+        let response = call_export(
+            reply_email,
+            json!({
+                "context": context("send", &[EFFECT_MAIL_STORE_READ, EFFECT_MAIL_STORE_WRITE, EFFECT_SMTP_SEND]),
+                "email_id": "email-5",
+                "account_id": "acc-1",
+                "body_text": "Thanks for your message.",
+                "reply_all": false,
+                "send_now": true
+            }),
+        );
+
+        assert_eq!(response["ok"]["operation"], "reply_email");
+        assert_eq!(response["ok"]["data"]["send_now"], true);
+        let effects = response["ok"]["host_effects"].as_array().unwrap();
+        let effect_names: Vec<&str> = effects.iter().map(|e| e["effect"].as_str().unwrap()).collect();
+        // Source must be read first to preserve thread metadata.
+        assert!(effect_names.contains(&EFFECT_MAIL_STORE_READ));
+        assert!(effect_names.contains(&EFFECT_SMTP_SEND));
+    }
+
+    #[test]
+    fn forward_email_returns_recipient_count_so_compose_summary_is_accurate() {
+        // Result: forwarding to multiple recipients shows the correct count in the compose summary.
+        let response = call_export(
+            forward_email,
+            json!({
+                "context": context("send", &[EFFECT_MAIL_STORE_READ, EFFECT_MAIL_STORE_WRITE, EFFECT_SMTP_SEND]),
+                "email_id": "email-3",
+                "account_id": "acc-1",
+                "to": [
+                    { "email": "bob@example.com" },
+                    { "email": "carol@example.org" }
+                ],
+                "note_text": "FYI",
+                "send_now": false
+            }),
+        );
+
+        assert_eq!(response["ok"]["operation"], "forward_email");
+        assert_eq!(response["ok"]["data"]["recipient_count"], 2);
+    }
+
+    // ─── Scheduled Send ───────────────────────────────────────────────────────
+    // Intent: user can schedule a message and cancel it before it dispatches.
+
+    #[test]
+    fn schedule_send_returns_job_id_so_cancel_button_can_identify_the_queued_job() {
+        // Result: scheduled message appears with a job ID so the cancel action can reference it.
+        let response = call_export(
+            schedule_send,
+            json!({
+                "context": context("send", &[EFFECT_MAIL_STORE_WRITE, EFFECT_SCHEDULE_JOB]),
+                "draft_id": "draft-scheduled",
+                "account_id": "acc-1",
+                "scheduled_for": 1_800_000_000_i64
+            }),
+        );
+
+        assert_eq!(response["ok"]["operation"], "schedule_send");
+        let job_id = response["ok"]["data"]["job_id"].as_str().unwrap();
+        assert!(job_id.starts_with("job_"), "job_id must be prefixed so it is recognisable in the UI");
+        assert_eq!(response["ok"]["data"]["draft_id"], "draft-scheduled");
+        let effects = response["ok"]["host_effects"].as_array().unwrap();
+        let effect_names: Vec<&str> = effects.iter().map(|e| e["effect"].as_str().unwrap()).collect();
+        assert!(effect_names.contains(&EFFECT_SCHEDULE_JOB));
+        assert!(effect_names.contains(&EFFECT_MAIL_STORE_WRITE));
+    }
+
+    #[test]
+    fn cancel_scheduled_send_plans_cancel_job_and_clears_draft_metadata_so_draft_becomes_editable() {
+        // Result: cancelling a scheduled send re-opens the draft for editing without re-sending.
+        let response = call_export(
+            cancel_scheduled_send,
+            json!({
+                "context": context("send", &[EFFECT_MAIL_STORE_WRITE, EFFECT_CANCEL_JOB]),
+                "job_id": "job-abc123",
+                "account_id": "acc-1",
+                "draft_id": "draft-scheduled"
+            }),
+        );
+
+        assert_eq!(response["ok"]["operation"], "cancel_scheduled_send");
+        assert_eq!(response["ok"]["data"]["mutation"], "cancel_scheduled_send");
+        let effects = response["ok"]["host_effects"].as_array().unwrap();
+        let effect_names: Vec<&str> = effects.iter().map(|e| e["effect"].as_str().unwrap()).collect();
+        assert!(effect_names.contains(&EFFECT_CANCEL_JOB));
+        assert!(effect_names.contains(&EFFECT_MAIL_STORE_WRITE),
+            "metadata on the draft must be cleared so the UI restores it to editable state");
+    }
+
+    // ─── Organize ─────────────────────────────────────────────────────────────
+    // Intent: user can flag, archive, delete, and move messages from list and reading pane.
+
+    #[test]
+    fn flag_email_plans_mail_store_write_and_echoes_resource_ids_for_optimistic_ui_update() {
+        // Result: clicking the flag icon immediately updates the row and persists the change.
+        let response = call_export(
+            flag_email,
+            json!({
+                "context": context("organize", &[EFFECT_MAIL_STORE_WRITE]),
+                "email_ids": ["email-1"],
+                "flagged": true,
+                "account_id": "acc-1"
+            }),
+        );
+
+        assert_eq!(response["ok"]["operation"], "flag_email");
+        assert_eq!(response["ok"]["data"]["mutation"], "flag_email");
+        assert_eq!(response["ok"]["data"]["resource_ids"][0], "email-1");
+        let effects = response["ok"]["host_effects"].as_array().unwrap();
+        assert!(effects.iter().any(|e| e["effect"] == EFFECT_MAIL_STORE_WRITE));
+    }
+
+    #[test]
+    fn archive_email_plans_archive_destination_so_message_leaves_inbox_immediately() {
+        // Result: archived message disappears from inbox; folder counts reconcile on effect completion.
+        let response = call_export(
+            archive_email,
+            json!({
+                "context": context("organize", &[EFFECT_MAIL_STORE_WRITE]),
+                "email_ids": ["email-3"],
+                "account_id": "acc-1"
+            }),
+        );
+
+        assert_eq!(response["ok"]["operation"], "archive_email");
+        assert_eq!(response["ok"]["data"]["mutation"], "archive_email");
+        let effects = response["ok"]["host_effects"].as_array().unwrap();
+        let payload = &effects[0]["payload"];
+        assert_eq!(payload["destination_mailbox_id"], "ARCHIVE",
+            "archive must target the ARCHIVE mailbox so the host moves the message correctly");
+    }
+
+    #[test]
+    fn delete_email_soft_delete_moves_to_trash_using_write_effect() {
+        // Result: deleted message moves to Trash and is recoverable until Trash is emptied.
+        let response = call_export(
+            delete_email,
+            json!({
+                "context": context("organize", &[EFFECT_MAIL_STORE_WRITE, EFFECT_MAIL_STORE_DELETE]),
+                "email_ids": ["email-2"],
+                "account_id": "acc-1",
+                "permanent": false
+            }),
+        );
+
+        assert_eq!(response["ok"]["operation"], "delete_email");
+        assert_eq!(response["ok"]["data"]["mutation"], "delete_email");
+        let effects = response["ok"]["host_effects"].as_array().unwrap();
+        assert!(effects.iter().any(|e| e["effect"] == EFFECT_MAIL_STORE_WRITE),
+            "soft delete must use MailStoreWrite so the message moves to Trash, not a hard delete");
+    }
+
+    #[test]
+    fn delete_email_permanent_flag_uses_delete_effect_for_hard_removal() {
+        // Result: permanent delete bypasses Trash — user must confirm destructive action in UI.
+        let response = call_export(
+            delete_email,
+            json!({
+                "context": context("organize", &[EFFECT_MAIL_STORE_WRITE, EFFECT_MAIL_STORE_DELETE]),
+                "email_ids": ["email-old"],
+                "account_id": "acc-1",
+                "permanent": true
+            }),
+        );
+
+        assert_eq!(response["ok"]["data"]["mutation"], "delete_email_permanent");
+        let effects = response["ok"]["host_effects"].as_array().unwrap();
+        assert!(effects.iter().any(|e| e["effect"] == EFFECT_MAIL_STORE_DELETE));
+    }
+
+    #[test]
+    fn move_email_plans_destination_mailbox_so_message_appears_in_target_folder() {
+        // Result: moved message disappears from current folder and appears in the target folder.
+        let response = call_export(
+            move_email,
+            json!({
+                "context": context("organize", &[EFFECT_MAIL_STORE_WRITE]),
+                "email_ids": ["email-5"],
+                "destination_mailbox_id": "projects",
+                "account_id": "acc-1"
+            }),
+        );
+
+        assert_eq!(response["ok"]["operation"], "move_email");
+        assert_eq!(response["ok"]["data"]["mutation"], "move_email");
+        let effects = response["ok"]["host_effects"].as_array().unwrap();
+        assert_eq!(effects[0]["payload"]["destination_mailbox_id"], "projects");
+    }
+
+    // ─── Folder Management ────────────────────────────────────────────────────
+    // Intent: user can create, rename, and delete custom folders from the sidebar.
+
+    #[test]
+    fn create_folder_returns_deterministic_mailbox_id_so_sidebar_can_navigate_to_new_folder() {
+        // Result: new folder appears in the sidebar immediately with a stable ID.
+        let response = call_export(
+            create_folder,
+            json!({
+                "context": context("organize", &[EFFECT_MAIL_STORE_WRITE]),
+                "account_id": "acc-1",
+                "name": "Projects"
+            }),
+        );
+
+        assert_eq!(response["ok"]["operation"], "create_folder");
+        let mailbox_id = response["ok"]["data"]["mailbox_id"].as_str().unwrap();
+        assert!(mailbox_id.starts_with("fld_"),
+            "folder id must be prefixed so the sidebar can distinguish custom folders");
+        assert_eq!(response["ok"]["data"]["name"], "Projects");
+    }
+
+    #[test]
+    fn rename_folder_plans_mail_store_write_and_returns_updated_name_for_sidebar_refresh() {
+        // Result: folder title updates in the sidebar after rename without a full reload.
+        let response = call_export(
+            rename_folder,
+            json!({
+                "context": context("organize", &[EFFECT_MAIL_STORE_WRITE]),
+                "account_id": "acc-1",
+                "mailbox_id": "fld-custom-1",
+                "new_name": "Work Projects"
+            }),
+        );
+
+        assert_eq!(response["ok"]["operation"], "rename_folder");
+        assert_eq!(response["ok"]["data"]["name"], "Work Projects");
+        let effects = response["ok"]["host_effects"].as_array().unwrap();
+        assert!(effects.iter().any(|e| e["effect"] == EFFECT_MAIL_STORE_WRITE));
+    }
+
+    #[test]
+    fn delete_folder_plans_mail_store_delete_so_sidebar_removes_folder() {
+        // Result: deleted folder disappears from the sidebar; contained messages are handled by host.
+        let response = call_export(
+            delete_folder,
+            json!({
+                "context": context("organize", &[EFFECT_MAIL_STORE_DELETE]),
+                "account_id": "acc-1",
+                "mailbox_id": "fld-old-project"
+            }),
+        );
+
+        assert_eq!(response["ok"]["operation"], "delete_folder");
+        assert_eq!(response["ok"]["data"]["mutation"], "delete_folder");
+        let effects = response["ok"]["host_effects"].as_array().unwrap();
+        assert!(effects.iter().any(|e| e["effect"] == EFFECT_MAIL_STORE_DELETE));
+    }
+
+    // ─── Rules ────────────────────────────────────────────────────────────────
+    // Intent: user can create and manage mail automation rules from Settings → Rules.
+
+    fn valid_rule_payload() -> Value {
+        json!({
+            "rule_id": "rule-1",
+            "name": "Move newsletters",
+            "enabled": true,
+            "stop_processing": false,
+            "priority": 1,
+            "conditions": [{ "field": "from", "operator": "contains", "value": "newsletter" }],
+            "actions": [{ "action_type": "move_to", "value": "newsletters" }]
+        })
+    }
+
+    #[test]
+    fn create_rule_with_valid_conditions_plans_mail_store_write_so_rule_applies_to_future_mail() {
+        // Result: saved rule appears in the Rules list and affects incoming messages per its conditions.
+        let response = call_export(
+            create_rule,
+            json!({
+                "context": context("organize", &[EFFECT_MAIL_STORE_WRITE]),
+                "account_id": "acc-1",
+                "rule": valid_rule_payload()
+            }),
+        );
+
+        assert_eq!(response["ok"]["operation"], "create_rule");
+        assert_eq!(response["ok"]["data"]["rule_id"], "rule-1");
+        assert_eq!(response["ok"]["data"]["name"], "Move newsletters");
+        let effects = response["ok"]["host_effects"].as_array().unwrap();
+        assert!(effects.iter().any(|e| e["effect"] == EFFECT_MAIL_STORE_WRITE));
+    }
+
+    #[test]
+    fn list_rules_triggers_host_refresh_when_no_snapshot_so_rules_settings_shows_current_list() {
+        // Result: Rules section in settings shows all saved rules after opening.
+        let response = call_export(
+            list_rules,
+            json!({
+                "context": context("organize", &[EFFECT_MAIL_STORE_READ]),
+                "account_id": "acc-1"
+            }),
+        );
+
+        assert_eq!(response["ok"]["operation"], "list_rules");
+        let effects = response["ok"]["host_effects"].as_array().unwrap();
+        assert!(!effects.is_empty(), "host fetch effect must be planned so the rules list populates");
+    }
+
+    #[test]
+    fn delete_rule_plans_mail_store_delete_so_rule_is_removed_from_settings_list() {
+        // Result: deleted rule disappears from the Rules settings section immediately.
+        let response = call_export(
+            delete_rule,
+            json!({
+                "context": context("organize", &[EFFECT_MAIL_STORE_DELETE]),
+                "account_id": "acc-1",
+                "rule_id": "rule-1"
+            }),
+        );
+
+        assert_eq!(response["ok"]["operation"], "delete_rule");
+        assert_eq!(response["ok"]["data"]["mutation"], "delete_rule");
+        let effects = response["ok"]["host_effects"].as_array().unwrap();
+        assert!(effects.iter().any(|e| e["effect"] == EFFECT_MAIL_STORE_DELETE));
+    }
+
+    // ─── Identities and Signatures ────────────────────────────────────────────
+    // Intent: user can manage sender aliases and signatures from Settings → Identities.
+
+    fn valid_identity() -> Value {
+        json!({
+            "identity_id": "id-1",
+            "account_id": "acc-1",
+            "kind": "alias",
+            "display_name": "Work Account",
+            "email_address": "work@example.com",
+            "enabled": true,
+            "is_default_for_account": false,
+            "is_global_default": false,
+            "verification_state": "pending"
+        })
+    }
+
+    fn valid_signature() -> Value {
+        json!({
+            "signature_id": "sig-1",
+            "account_id": "acc-1",
+            "label": "Work Signature",
+            "body_text": "Best regards,\nWork Team",
+            "enabled": true,
+            "use_for_new": true,
+            "use_for_replies": false,
+            "use_for_forwards": false
+        })
+    }
+
+    #[test]
+    fn list_identities_returns_snapshot_with_signatures_so_compose_from_selector_can_populate() {
+        // Result: From selector in compose shows all configured aliases with their signatures.
+        let response = call_export(
+            list_identities,
+            json!({
+                "context": context("accounts", &[EFFECT_ACCOUNT_CREDENTIAL_READ, EFFECT_MAIL_STORE_READ])
+            }),
+        );
+
+        assert_eq!(response["ok"]["operation"], "list_identities");
+        assert!(response["ok"]["data"]["identities"].is_array());
+        assert!(response["ok"]["data"]["signatures"].is_array());
+    }
+
+    #[test]
+    fn save_identity_plans_mail_store_write_so_new_alias_appears_in_compose_from_selector() {
+        // Result: saved alias is immediately selectable in the compose From dropdown.
+        let response = call_export(
+            save_identity,
+            json!({
+                "context": context("accounts", &[EFFECT_ACCOUNT_CREDENTIAL_WRITE, EFFECT_MAIL_STORE_WRITE]),
+                "identity": valid_identity()
+            }),
+        );
+
+        assert_eq!(response["ok"]["operation"], "save_identity");
+        assert_eq!(response["ok"]["data"]["identity"]["identity_id"], "id-1");
+    }
+
+    #[test]
+    fn delete_identity_removes_alias_from_compose_from_selector() {
+        // Result: deleted alias no longer appears in compose From or account identity list.
+        let response = call_export(
+            delete_identity,
+            json!({
+                "context": context("accounts", &[EFFECT_ACCOUNT_CREDENTIAL_WRITE, EFFECT_MAIL_STORE_WRITE]),
+                "identity_id": "id-1",
+                "account_id": "acc-1"
+            }),
+        );
+
+        assert_eq!(response["ok"]["operation"], "delete_identity");
+        assert_eq!(response["ok"]["data"]["identity_id"], "id-1");
+    }
+
+    #[test]
+    fn save_signature_plans_mail_store_write_so_signature_appears_in_compose() {
+        // Result: saved signature is inserted in compose when the matching identity or context is selected.
+        let response = call_export(
+            save_signature,
+            json!({
+                "context": context("accounts", &[EFFECT_MAIL_STORE_WRITE]),
+                "signature": valid_signature()
+            }),
+        );
+
+        assert_eq!(response["ok"]["operation"], "save_signature");
+        assert_eq!(response["ok"]["data"]["signature"]["signature_id"], "sig-1");
+    }
+
+    #[test]
+    fn delete_signature_removes_it_from_compose_and_identity_association() {
+        // Result: deleted signature no longer appears in compose and identity cards update.
+        let response = call_export(
+            delete_signature,
+            json!({
+                "context": context("accounts", &[EFFECT_MAIL_STORE_WRITE, EFFECT_MAIL_STORE_DELETE]),
+                "signature_id": "sig-1",
+                "account_id": "acc-1"
+            }),
+        );
+
+        assert_eq!(response["ok"]["operation"], "delete_signature");
+        assert_eq!(response["ok"]["data"]["signature_id"], "sig-1");
+    }
+
+    // ─── Preferences ─────────────────────────────────────────────────────────
+    // Intent: user can personalize reading, compose, notification, and sync behavior.
+
+    #[test]
+    fn get_user_preferences_returns_defaults_when_no_snapshot_supplied() {
+        // Result: opening Preferences settings shows sensible defaults ready to customize.
+        let response = call_export(
+            get_user_preferences,
+            json!({
+                "context": context("accounts", &[EFFECT_MAIL_STORE_READ]),
+                "include_defaults": true
+            }),
+        );
+
+        assert_eq!(response["ok"]["operation"], "get_user_preferences");
+        assert!(response["ok"]["data"]["preferences"]["reading"].is_object());
+        assert!(response["ok"]["data"]["preferences"]["compose"].is_object());
+        assert!(response["ok"]["data"]["preferences"]["notifications"].is_object());
+        assert!(response["ok"]["data"]["preferences"]["sync_defaults"].is_object());
+        assert_eq!(response["ok"]["data"]["defaults_applied"], true);
+    }
+
+    #[test]
+    fn save_user_preferences_within_valid_bounds_acknowledges_write_so_changes_take_effect() {
+        // Result: saved preferences change visible behavior — page size, pane position, undo window.
+        let response = call_export(
+            save_user_preferences,
+            json!({
+                "context": context("accounts", &[EFFECT_MAIL_STORE_WRITE]),
+                "preferences": {
+                    "reading": { "page_size": 50 },
+                    "compose": { "undo_send_delay_seconds": 10 },
+                    "notifications": { "enabled": true },
+                    "sync_defaults": { "interval_minutes": 5 }
+                }
+            }),
+        );
+
+        assert_eq!(response["ok"]["operation"], "save_user_preferences");
+        assert!(response["ok"]["data"]["preferences"].is_object());
+    }
+
+    // ─── Account Setup ────────────────────────────────────────────────────────
+    // Intent: user can add and remove mail accounts including receive-only accounts.
+
+    #[test]
+    fn complete_account_setup_receive_only_skips_smtp_requirement_so_user_can_read_without_sending() {
+        // Result: an account with only IMAP configured is saved as receive-only; send actions are disabled.
+        let mut account = account_payload();
+        account["desired_status"] = json!("receive_only");
+        // Remove outgoing config to simulate SMTP failure / intentional receive-only.
+        account.as_object_mut().unwrap().remove("outgoing");
+
+        let response = call_export(
+            complete_account_setup,
+            json!({
+                "context": context("accounts", &[
+                    EFFECT_ACCOUNT_CREDENTIAL_WRITE,
+                    EFFECT_STORE_PLATFORM_SECRET,
+                    EFFECT_MAIL_STORE_WRITE,
+                    EFFECT_IMAP_SYNC
+                ]),
+                "account": account,
+                "save_mode": "receive_only",
+                "connection_test_result": {
+                    "test_id": "test-001",
+                    "steps": [
+                        { "step": "imap_auth", "state": "passed" },
+                        { "step": "imap_mailbox_discovery", "state": "passed" }
+                    ]
+                }
+            }),
+        );
+
+        assert_eq!(response["ok"]["operation"], "complete_account_setup");
+        assert_eq!(response["ok"]["data"]["status"], "receive_only",
+            "account must be saved as receive_only so compose and send are disabled for this account");
+    }
+
+    #[test]
+    fn remove_account_plans_credential_and_cache_cleanup_so_nothing_is_left_behind() {
+        // Result: removed account disappears from the account list with scheduled sends and cache cleared.
+        let response = call_export(
+            remove_account,
+            json!({
+                "context": context("accounts", &[
+                    EFFECT_ACCOUNT_CREDENTIAL_WRITE,
+                    EFFECT_MAIL_STORE_WRITE,
+                    EFFECT_MAIL_STORE_DELETE,
+                    EFFECT_CANCEL_JOB
+                ]),
+                "account_id": "acc-1",
+                "remove_local_cache": true,
+                "cancel_scheduled_sends": true
+            }),
+        );
+
+        assert_eq!(response["ok"]["operation"], "remove_account");
+        assert_eq!(response["ok"]["data"]["account_id"], "acc-1");
+        let cleanup = response["ok"]["data"]["cleanup_planned"].as_array().unwrap();
+        assert!(!cleanup.is_empty(), "cleanup_planned must list what will be removed");
+    }
+
+    // ─── Permission Completeness ──────────────────────────────────────────────
+    // Intent: the permission model is strictly enforced — every operation rejects under-privileged callers.
+
+    #[test]
+    fn read_permission_cannot_draft_email() {
+        // Result: an agent with mail:read cannot create drafts — must have at least mail:draft.
+        let response = call_export(
+            draft_email,
+            json!({
+                "context": context("read", &[EFFECT_MAIL_STORE_WRITE]),
+                "draft": {
+                    "account_id": "acc-1",
+                    "to": [{ "email": "bob@example.com" }],
+                    "subject": "Test",
+                    "body_text": "Body"
+                }
+            }),
+        );
+
+        assert_eq!(response["err"]["code"], "PermissionDenied");
+    }
+
+    #[test]
+    fn draft_permission_cannot_send_email() {
+        // Result: an agent with mail:draft cannot send — prevents accidental send from automation.
+        let response = call_export(
+            send_email,
+            json!({
+                "context": context("draft", &[EFFECT_MAIL_STORE_WRITE, EFFECT_SMTP_SEND]),
+                "draft_id": "draft-1",
+                "account_id": "acc-1"
+            }),
+        );
+
+        assert_eq!(response["err"]["code"], "PermissionDenied");
+    }
+
+    #[test]
+    fn none_permission_cannot_read_emails() {
+        // Result: unauthenticated or no-permission context is completely blocked from inbox.
+        let response = call_export(
+            read_emails,
+            json!({
+                "context": context("none", &[EFFECT_ACCOUNT_CREDENTIAL_READ, EFFECT_IMAP_FETCH]),
+                "mailbox_id": "inbox"
+            }),
+        );
+
+        assert_eq!(response["err"]["code"], "PermissionDenied");
+    }
+
+    #[test]
+    fn admin_permission_satisfies_all_access_levels() {
+        // Result: admin context can call read, draft, send, and organize operations.
+        let read_res = call_export(
+            read_emails,
+            json!({
+                "context": context("admin", &[EFFECT_ACCOUNT_CREDENTIAL_READ, EFFECT_IMAP_FETCH]),
+                "mailbox_id": "inbox"
+            }),
+        );
+        assert_eq!(read_res["ok"]["operation"], "read_emails");
+
+        let draft_res = call_export(
+            draft_email,
+            json!({
+                "context": context("admin", &[EFFECT_MAIL_STORE_WRITE]),
+                "draft": {
+                    "account_id": "acc-1",
+                    "to": [{ "email": "alice@example.com" }],
+                    "subject": "Test",
+                    "body_text": "Body"
+                }
+            }),
+        );
+        assert_eq!(draft_res["ok"]["operation"], "draft_email");
+
+        let archive_res = call_export(
+            archive_email,
+            json!({
+                "context": context("admin", &[EFFECT_MAIL_STORE_WRITE]),
+                "email_ids": ["email-1"],
+                "account_id": "acc-1"
+            }),
+        );
+        assert_eq!(archive_res["ok"]["operation"], "archive_email");
+    }
+
+    #[test]
+    fn send_permission_cannot_organize_folders() {
+        // Result: a send-only agent cannot create or delete folders — organize must be separate.
+        let response = call_export(
+            create_folder,
+            json!({
+                "context": context("send", &[EFFECT_MAIL_STORE_WRITE]),
+                "account_id": "acc-1",
+                "name": "NewFolder"
+            }),
+        );
+
+        assert_eq!(response["err"]["code"], "PermissionDenied");
+    }
+
+    // ─── Boundary Validation ─────────────────────────────────────────────────
+    // Intent: the system enforces safe data limits before forwarding to the host.
+
+    #[test]
+    fn draft_email_rejects_body_exceeding_max_length_before_writing_to_host() {
+        // Result: oversized message body is rejected with a clear error before any storage occurs.
+        let large_body = "x".repeat(MAX_BODY_LENGTH + 1);
+        let response = call_export(
+            draft_email,
+            json!({
+                "context": context("draft", &[EFFECT_MAIL_STORE_WRITE]),
+                "draft": {
+                    "account_id": "acc-1",
+                    "to": [{ "email": "alice@example.com" }],
+                    "subject": "Big",
+                    "body_text": large_body
+                }
+            }),
+        );
+
+        assert_eq!(response["err"]["code"], "InvalidInput",
+            "body exceeding MAX_BODY_LENGTH must be rejected before host storage");
+    }
+
+    #[test]
+    fn draft_email_rejects_too_many_recipients_to_prevent_spam_from_automation() {
+        // Result: drafts with more than MAX_RECIPIENTS recipients are blocked at validation time.
+        let recipients: Vec<Value> = (0..=MAX_RECIPIENTS)
+            .map(|i| json!({ "email": format!("user{i}@example.com") }))
+            .collect();
+        let response = call_export(
+            draft_email,
+            json!({
+                "context": context("draft", &[EFFECT_MAIL_STORE_WRITE]),
+                "draft": {
+                    "account_id": "acc-1",
+                    "to": recipients,
+                    "subject": "Mass send",
+                    "body_text": "Body"
+                }
+            }),
+        );
+
+        assert_eq!(response["err"]["code"], "TooManyRecipients");
+    }
+
+    #[test]
+    fn draft_email_rejects_overlong_subject_before_writing_to_host() {
+        // Result: subjects violating RFC 5322 length limits are rejected with a clear validation error.
+        let long_subject = "s".repeat(MAX_SUBJECT_LENGTH + 1);
+        let response = call_export(
+            draft_email,
+            json!({
+                "context": context("draft", &[EFFECT_MAIL_STORE_WRITE]),
+                "draft": {
+                    "account_id": "acc-1",
+                    "to": [{ "email": "alice@example.com" }],
+                    "subject": long_subject,
+                    "body_text": "Body"
+                }
+            }),
+        );
+
+        assert_eq!(response["err"]["code"], "InvalidInput",
+            "subject exceeding MAX_SUBJECT_LENGTH must be rejected");
+    }
+
+    #[test]
+    fn read_emails_rejects_page_size_above_maximum_to_prevent_oversized_host_queries() {
+        // Result: pagination is bounded so the host is never asked for more than MAX_PAGE_SIZE rows.
+        let response = call_export(
+            read_emails,
+            json!({
+                "context": context("read", &[EFFECT_ACCOUNT_CREDENTIAL_READ, EFFECT_IMAP_FETCH]),
+                "mailbox_id": "inbox",
+                "pagination": { "offset": 0, "limit": MAX_PAGE_SIZE + 1 }
+            }),
+        );
+
+        assert_eq!(response["err"]["code"], "InvalidInput",
+            "limit above MAX_PAGE_SIZE must be rejected to protect host performance");
+    }
 }
