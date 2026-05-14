@@ -38,8 +38,21 @@ type InstalledApp = {
 
 type MockAppPlatformController = {
   installCalls: string[];
+  enableCalls: string[];
+  disableCalls: string[];
   uninstallCalls: string[];
   grantPayloads: Array<{ app_id: string; capabilities: string[] }>;
+};
+
+type AppUiSchemaState = {
+  app_id: string;
+  state: 'available' | 'disabled' | 'not_installed' | 'permission_denied' | 'unsupported';
+  page_layout_schema?: unknown;
+  recovery?: {
+    title: string;
+    message: string;
+    action?: string;
+  };
 };
 
 type CatalogEntryFile = {
@@ -98,6 +111,25 @@ test.describe('Synapp Apps app-platform catalog visibility', () => {
     }
   });
 
+  test('TC-SA-CAL-001: Calendar Management catalog card exposes package metadata and verification state', async ({ page }) => {
+    const catalog = await loadCatalogEntries();
+    const calendar = findCatalogApp(catalog, 'calendar-management');
+    await mockAppPlatform(page, catalog);
+
+    expect(calendar.version).toBe('0.1.0');
+    expect(calendar.summary).toBe('Outlook-inspired Synapp calendar workspace with deterministic Wasm planning tools.');
+    expect(calendar.verification_status).toBe('unavailable');
+
+    await page.goto('/admin');
+    await page.getByTestId('admin-nav-app-platform').click();
+
+    const card = page.getByTestId('app-card-calendar-management');
+    await expect(card).toBeVisible();
+    await expect(card).toContainText('Calendar Management');
+    await expect(card).toContainText('Outlook-inspired Synapp calendar workspace with deterministic Wasm planning tools.');
+    await expect(card).toContainText('v0.1.0');
+  });
+
   test('TC-SA-CAT-003: Calendar Management install, capability grants, uninstall, and reinstall lifecycle', async ({ page }) => {
     const catalog = await loadCatalogEntries();
     const calendar = findCatalogApp(catalog, 'calendar-management');
@@ -112,6 +144,7 @@ test.describe('Synapp Apps app-platform catalog visibility', () => {
     await page.getByTestId('app-install-confirm').click();
 
     await expect(page.getByTestId('installed-app-row-calendar-management')).toContainText(calendar.name);
+    await expect(page.getByTestId('nav-link-calendar-management')).toBeVisible();
     expect(platform.installCalls).toEqual(['calendar-management']);
 
     await page.getByTestId('app-review-button-calendar-management').click();
@@ -149,6 +182,7 @@ test.describe('Synapp Apps app-platform catalog visibility', () => {
     await page.getByTestId('app-uninstall-confirm').click();
 
     await expect(page.getByTestId('installed-app-row-calendar-management')).toHaveCount(0);
+    await expect(page.getByTestId('nav-link-calendar-management')).toHaveCount(0);
     await expect(page.getByTestId('app-install-button-calendar-management')).toBeVisible();
     expect(platform.uninstallCalls).toEqual(['calendar-management']);
 
@@ -156,12 +190,173 @@ test.describe('Synapp Apps app-platform catalog visibility', () => {
     await page.getByTestId('app-install-confirm').click();
 
     await expect(page.getByTestId('installed-app-row-calendar-management')).toContainText(calendar.name);
+    await expect(page.getByTestId('nav-link-calendar-management')).toBeVisible();
     expect(platform.installCalls).toEqual(['calendar-management', 'calendar-management']);
 
     await page.getByTestId('app-review-button-calendar-management').click();
     await expect(page.getByTestId('app-capability-locked-calendar:read')).toBeVisible();
     await expect(page.getByTestId('app-capability-toggle-calendar:write')).not.toBeChecked();
     await expect(page.getByTestId('app-capability-toggle-calendar:settings')).not.toBeChecked();
+  });
+
+  test('TC-SA-CAL-002: Calendar Management required grants are immutable and optional grants persist', async ({ page }) => {
+    const catalog = await loadCatalogEntries();
+    const calendar = findCatalogApp(catalog, 'calendar-management');
+    const platform = await mockAppPlatform(page, catalog);
+
+    await page.goto('/admin');
+    await page.getByTestId('admin-nav-app-platform').click();
+    await page.getByTestId('app-install-button-calendar-management').click();
+    await page.getByTestId('app-install-confirm').click();
+
+    const invalidGrantResponse = await page.evaluate(async () => {
+      const response = await fetch('/api/admin/apps/calendar-management/capability-grants', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ capabilities: ['calendar:write'] }),
+      });
+      return { status: response.status, body: await response.json() };
+    });
+
+    expect(invalidGrantResponse).toEqual({
+      status: 400,
+      body: { error: 'invalid capability grant request' },
+    });
+
+    await page.getByTestId('app-review-button-calendar-management').click();
+    await expect(page.getByTestId('app-capability-locked-calendar:read')).toBeVisible();
+    await expect(page.getByTestId('app-capability-toggle-calendar:write')).not.toBeChecked();
+    await expect(page.getByTestId('app-capability-toggle-calendar:settings')).not.toBeChecked();
+
+    await page.getByTestId('app-capability-toggle-calendar:write').check();
+    await page.getByTestId('app-capability-toggle-calendar:settings').check();
+    await page.getByTestId('app-capability-save').click();
+
+    await expect(page.getByTestId('app-capability-save')).toBeDisabled();
+    expect(platform.grantPayloads.at(-1)).toEqual({
+      app_id: calendar.app_id,
+      capabilities: ['calendar:read', 'calendar:write', 'calendar:settings'],
+    });
+
+    await page.getByTestId('app-platform-tab-installed').click();
+    await page.getByTestId('app-review-button-calendar-management').click();
+    await expect(page.getByTestId('app-capability-toggle-calendar:write')).toBeChecked();
+    await expect(page.getByTestId('app-capability-toggle-calendar:settings')).toBeChecked();
+  });
+
+  test('TC-SA-CAL-003: Calendar Management UI schema resolves not-installed, unsupported, and disabled states', async ({ page }) => {
+    const catalog = await loadCatalogEntries();
+    await mockAppPlatform(page, catalog);
+
+    await page.goto('/admin');
+    await page.getByTestId('admin-nav-app-platform').click();
+
+    await expect(fetchCalendarUiSchemaState(page)).resolves.toMatchObject({
+      app_id: 'calendar-management',
+      state: 'not_installed',
+      recovery: { action: 'install' },
+    });
+    await expectCalendarAppRouteRecovery(page, /not installed|install|Calendar Management/i);
+
+    await page.goto('/admin');
+    await page.getByTestId('admin-nav-app-platform').click();
+    await page.getByTestId('app-install-button-calendar-management').click();
+    await page.getByTestId('app-install-confirm').click();
+
+    await expect(fetchCalendarUiSchemaState(page)).resolves.toMatchObject({
+      app_id: 'calendar-management',
+      state: 'unsupported',
+      recovery: { action: 'platform_escalation' },
+    });
+
+    await page.evaluate(async () => {
+      const response = await fetch('/api/admin/apps/calendar-management/disable', { method: 'POST' });
+      if (!response.ok) throw new Error(`disable failed: ${response.status}`);
+    });
+
+    await expect(fetchCalendarUiSchemaState(page)).resolves.toMatchObject({
+      app_id: 'calendar-management',
+      state: 'disabled',
+      recovery: { action: 'enable' },
+    });
+    await expectCalendarAppRouteRecovery(page, /disabled|enable|Calendar Management/i);
+  });
+
+  test('TC-SA-CAL-004: Calendar Management app route smoke renders shell or structured recovery', async ({ page }) => {
+    const catalog = await loadCatalogEntries();
+    await mockAppPlatform(page, catalog);
+
+    await page.goto('/admin');
+    await page.getByTestId('admin-nav-app-platform').click();
+    await page.getByTestId('app-install-button-calendar-management').click();
+    await page.getByTestId('app-install-confirm').click();
+
+    const response = await page.goto('/apps/calendar-management');
+    expect(response?.ok(), 'calendar app route should not fail at document navigation').toBe(true);
+
+    await expect(page.locator('body')).not.toHaveText(/^\s*$/);
+    await expect(page.locator('body')).toContainText(/Calendar Management|Calendar|unsupported|recovery|not available/i);
+  });
+
+  test('TC-SA-MAIL-001: Mail Client install, enable, capability review, uninstall, and reinstall lifecycle', async ({ page }) => {
+    const catalog = await loadCatalogEntries();
+    const mail = findCatalogApp(catalog, 'mail-client');
+    const platform = await mockAppPlatform(page, catalog);
+
+    await page.goto('/admin');
+    await page.getByTestId('admin-nav-app-platform').click();
+
+    await expect(page.getByTestId('app-card-mail-client')).toContainText(mail.name);
+    await expect(page.getByTestId('app-card-mail-client')).toContainText('Inbox-first Synapp mail workspace');
+    await page.getByTestId('app-install-button-mail-client').click();
+    await expect(page.getByTestId('app-install-modal')).toContainText('Read mail');
+    await expect(page.getByTestId('app-install-modal')).toContainText('Send mail');
+    await page.getByTestId('app-install-confirm').click();
+
+    await expect(page.getByTestId('installed-app-row-mail-client')).toContainText(mail.name);
+    await expect(page.getByTestId('nav-link-mail-client')).toBeVisible();
+    expect(platform.installCalls).toEqual(['mail-client']);
+
+    await page.getByTestId('app-review-button-mail-client').click();
+    await expect(page.getByTestId('app-capability-locked-mail:read')).toBeVisible();
+    await expect(page.getByTestId('app-capability-toggle-mail:draft')).not.toBeChecked();
+    await expect(page.getByTestId('app-capability-toggle-mail:send')).not.toBeChecked();
+    await expect(page.getByTestId('app-capability-toggle-mail:organize')).not.toBeChecked();
+    await expect(page.getByTestId('app-capability-toggle-mail:accounts')).not.toBeChecked();
+
+    await page.getByTestId('app-capability-toggle-mail:draft').check();
+    await page.getByTestId('app-capability-toggle-mail:send').check();
+    await page.getByTestId('app-capability-toggle-mail:organize').check();
+    await page.getByTestId('app-capability-save').click();
+
+    await expect(page.getByTestId('app-capability-save')).toBeDisabled();
+    expect(platform.grantPayloads.at(-1)).toEqual({
+      app_id: 'mail-client',
+      capabilities: ['mail:read', 'mail:draft', 'mail:send', 'mail:organize'],
+    });
+
+    await page.getByTestId('app-platform-tab-installed').click();
+    await page.getByTestId('app-uninstall-button-mail-client').click();
+    await expect(page.getByTestId('app-uninstall-modal')).toContainText('Uninstall Mail Client');
+    await page.getByTestId('app-uninstall-confirm').click();
+
+    await expect(page.getByTestId('installed-app-row-mail-client')).toHaveCount(0);
+    await expect(page.getByTestId('nav-link-mail-client')).toHaveCount(0);
+    await expect(page.getByTestId('app-install-button-mail-client')).toBeVisible();
+    expect(platform.uninstallCalls).toEqual(['mail-client']);
+
+    await page.getByTestId('app-install-button-mail-client').click();
+    await page.getByTestId('app-install-confirm').click();
+
+    await expect(page.getByTestId('installed-app-row-mail-client')).toContainText(mail.name);
+    await expect(page.getByTestId('nav-link-mail-client')).toBeVisible();
+    expect(platform.installCalls).toEqual(['mail-client', 'mail-client']);
+
+    await page.getByTestId('app-review-button-mail-client').click();
+    await expect(page.getByTestId('app-capability-locked-mail:read')).toBeVisible();
+    await expect(page.getByTestId('app-capability-toggle-mail:draft')).not.toBeChecked();
+    await expect(page.getByTestId('app-capability-toggle-mail:send')).not.toBeChecked();
+    await expect(page.getByTestId('app-capability-toggle-mail:organize')).not.toBeChecked();
   });
 });
 
@@ -226,6 +421,8 @@ async function mockAppPlatform(page: Page, catalog: AppCatalogEntry[]): Promise<
   const optionalGrants = new Map<string, Set<string>>();
   const controller: MockAppPlatformController = {
     installCalls: [],
+    enableCalls: [],
+    disableCalls: [],
     uninstallCalls: [],
     grantPayloads: [],
   };
@@ -271,6 +468,10 @@ async function mockAppPlatform(page: Page, catalog: AppCatalogEntry[]): Promise<
       capabilities: grantedCapabilities(app),
     };
   }
+
+  await page.route('**/api/setup/v1/status', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ setup_required: false }) });
+  });
 
   await page.route('**/api/auth/refresh', async (route) => {
     await route.fulfill({
@@ -348,6 +549,17 @@ async function mockAppPlatform(page: Page, catalog: AppCatalogEntry[]): Promise<
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify(reviewPayload(app)) });
   });
 
+  await page.route('**/api/v1/apps/*/ui-schema/main', async (route) => {
+    const appId = appIdFromUiSchemaUrl(route.request().url());
+    const app = appById.get(appId);
+    if (!app) {
+      await route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ app_id: appId, state: 'not_installed' }) });
+      return;
+    }
+
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify(uiSchemaPayload(app)) });
+  });
+
   await page.route('**/api/admin/apps/*/install', async (route) => {
     const appId = appIdFromAdminAppsUrl(route.request().url());
     const app = appById.get(appId);
@@ -360,6 +572,34 @@ async function mockAppPlatform(page: Page, catalog: AppCatalogEntry[]): Promise<
     installedIds.add(appId);
     enabledIds.add(appId);
     optionalGrants.set(appId, new Set());
+    const installedApp = installedPayload().find((candidate) => candidate.app_id === appId);
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ app: installedApp }) });
+  });
+
+  await page.route('**/api/admin/apps/*/enable', async (route) => {
+    const appId = appIdFromAdminAppsUrl(route.request().url());
+    const app = appById.get(appId);
+    if (!app || !installedIds.has(appId)) {
+      await route.fulfill({ status: 404, body: 'not found' });
+      return;
+    }
+
+    controller.enableCalls.push(appId);
+    enabledIds.add(appId);
+    const installedApp = installedPayload().find((candidate) => candidate.app_id === appId);
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ app: installedApp }) });
+  });
+
+  await page.route('**/api/admin/apps/*/disable', async (route) => {
+    const appId = appIdFromAdminAppsUrl(route.request().url());
+    const app = appById.get(appId);
+    if (!app || !installedIds.has(appId)) {
+      await route.fulfill({ status: 404, body: 'not found' });
+      return;
+    }
+
+    controller.disableCalls.push(appId);
+    enabledIds.delete(appId);
     const installedApp = installedPayload().find((candidate) => candidate.app_id === appId);
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ app: installedApp }) });
   });
@@ -434,6 +674,50 @@ async function mockAppPlatform(page: Page, catalog: AppCatalogEntry[]): Promise<
   });
 
   return controller;
+
+  function uiSchemaPayload(app: AppCatalogEntry): AppUiSchemaState {
+    if (!installedIds.has(app.app_id)) {
+      return {
+        app_id: app.app_id,
+        state: 'not_installed',
+        recovery: {
+          title: `${app.name} is not installed`,
+          message: 'Install the app before opening its workspace.',
+          action: 'install',
+        },
+      };
+    }
+
+    if (!enabledIds.has(app.app_id)) {
+      return {
+        app_id: app.app_id,
+        state: 'disabled',
+        recovery: {
+          title: `${app.name} is disabled`,
+          message: 'Enable the app before opening its workspace.',
+          action: 'enable',
+        },
+      };
+    }
+
+    if (app.app_id === 'calendar-management') {
+      return {
+        app_id: app.app_id,
+        state: 'unsupported',
+        recovery: {
+          title: 'Calendar workspace renderer unavailable',
+          message: 'Calendar Management currently declares legacy CalendarWorkspace metadata that the host cannot render as a canonical ui_schemas.main page.',
+          action: 'platform_escalation',
+        },
+      };
+    }
+
+    return {
+      app_id: app.app_id,
+      state: 'available',
+      page_layout_schema: { type: 'page', title: app.name },
+    };
+  }
 }
 
 async function readJson<T>(filePath: string): Promise<T> {
@@ -443,6 +727,25 @@ async function readJson<T>(filePath: string): Promise<T> {
 function appIdFromAdminAppsUrl(url: string): string {
   const segments = new URL(url).pathname.split('/').filter(Boolean);
   return segments[3];
+}
+
+function appIdFromUiSchemaUrl(url: string): string {
+  const segments = new URL(url).pathname.split('/').filter(Boolean);
+  return segments[3];
+}
+
+async function fetchCalendarUiSchemaState(page: Page): Promise<AppUiSchemaState> {
+  return page.evaluate(async () => {
+    const response = await fetch('/api/v1/apps/calendar-management/ui-schema/main');
+    return await response.json();
+  });
+}
+
+async function expectCalendarAppRouteRecovery(page: Page, expectedText: RegExp) {
+  const response = await page.goto('/apps/calendar-management');
+  expect(response?.ok(), 'calendar app route should resolve even when app state requires recovery').toBe(true);
+  await expect(page.locator('body')).not.toHaveText(/^\s*$/);
+  await expect(page.locator('body')).toContainText(expectedText);
 }
 
 function createJwt(): string {
