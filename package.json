@@ -1,0 +1,13 @@
+{
+  "name": "synapp-apps",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:e2e": "playwright test",
+    "test:e2e:catalog": "playwright test e2e/app-platform-catalog.spec.ts"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.54.2"
+  }
+}

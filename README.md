@@ -35,6 +35,14 @@ Validate the catalog before opening a pull request:
 scripts/validate_catalog.sh
 ```
 
+Run the app-platform catalog visibility checks against a local NexusCore frontend:
+
+```bash
+npm run test:e2e:catalog
+```
+
+The Playwright suite reads `catalog/index.v1.json` and the first-party app manifests from this repository, mocks the platform API responses, and verifies that every indexed app renders on the App Platform catalog page. Set `PLAYWRIGHT_APP_PLATFORM_URL` if the frontend is not running at `http://localhost:8080`.
+
 See each app's documentation for build prerequisites and deployment steps.
 
 ## Architecture

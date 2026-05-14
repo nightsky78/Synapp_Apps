@@ -1,0 +1,518 @@
+{
+  "schema_version": "1.0.0",
+  "app_id": "calendar-management",
+  "name": "Calendar Management",
+  "summary": "Outlook-inspired Synapp calendar workspace with deterministic Wasm planning tools.",
+  "description": "First-party Synapp calendar app. The React UI is the human calendar workspace for calendar views, event editing, scheduling assistant, invitations, categories, sharing, delegates, subscriptions, reminders, settings, offline state, and audit projections. The Wasm module is a pure planner and validator; host services own persistence, invites, contacts, free/busy, rooms, reminders, conference links, sharing, subscriptions, offline cache, and audit.",
+  "version": "0.1.0",
+  "publisher": "Synapp",
+  "category": "productivity",
+  "repository_url": "https://github.com/nightsky78/Synapp_Apps/",
+  "package_url": "https://github.com/nightsky78/Synapp_Apps/releases/download/calendar-management-v0.1.0/calendar-management-0.1.0.tar.gz",
+  "package_sha256": "6484350a5e9e92b93ba64b1d49ccfdc8d777de22e4b597fa1f13f3991a38612f",
+  "manifest_sha256": "f6388f0573bdbf191d539876ac639c7dd9f60788f2e958a19663be73faa10be4",
+  "signature": {
+    "type": "metadata-only",
+    "signer": "synapp-dev-catalog",
+    "value": "metadata-only:calendar-management:0.1.0",
+    "verification_status": "metadata_verified"
+  },
+  "source": {
+    "repository": "https://github.com/nightsky78/Synapp_Apps/",
+    "directory": "apps/first-party/calendar-management",
+    "commit": "22e30376d07d17c90936d2068c496fb9cc33e57b"
+  },
+  "manifest": {
+    "$schema": "../../../catalog/schemas/package-manifest.schema.json",
+    "schema_version": "1.0.0",
+    "app_id": "calendar-management",
+    "name": "Calendar Management",
+    "version": "0.1.0",
+    "summary": "Outlook-inspired Synapp calendar workspace with deterministic Wasm planning tools.",
+    "description": "First-party Synapp calendar app. The React UI is the human calendar workspace for calendar views, event editing, scheduling assistant, invitations, categories, sharing, delegates, subscriptions, reminders, settings, offline state, and audit projections. The Wasm module is a pure planner and validator; host services own persistence, invites, contacts, free/busy, rooms, reminders, conference links, sharing, subscriptions, offline cache, and audit.",
+    "publisher": {
+      "id": "synapp",
+      "name": "Synapp"
+    },
+    "runtime": "wasm32-wasip1",
+    "platform_api": "v1",
+    "entrypoint": "target/wasm32-wasip1/release/calendar_management.wasm",
+    "capabilities": [
+      {
+        "capability": "calendar:read",
+        "label": "Read calendars",
+        "description": "Read calendars, event projections, invitations, categories, reminders, free/busy snapshots, offline state, and sanitized activity projections.",
+        "required": true,
+        "risk": "high"
+      },
+      {
+        "capability": "calendar:write",
+        "label": "Change calendars",
+        "description": "Create, update, copy, move, and delete events, calendars, categories, preferences, and reminder projections through host effects.",
+        "required": false,
+        "risk": "high"
+      },
+      {
+        "capability": "calendar:invite",
+        "label": "Send calendar invitations",
+        "description": "Plan invitations, updates, cancellations, conference link creation, and attendee notifications through host services.",
+        "required": false,
+        "risk": "critical"
+      },
+      {
+        "capability": "calendar:respond",
+        "label": "Respond to invitations",
+        "description": "Accept, tentatively accept, decline, or propose a new time through host RSVP services.",
+        "required": false,
+        "risk": "high"
+      },
+      {
+        "capability": "calendar:share",
+        "label": "Share calendars",
+        "description": "Grant, revoke, accept, or subscribe to calendar access through host-managed sharing and subscription services.",
+        "required": false,
+        "risk": "high"
+      },
+      {
+        "capability": "calendar:delegate",
+        "label": "Delegate calendar access",
+        "description": "Plan delegated calendar changes and access management with host audit handling.",
+        "required": false,
+        "risk": "critical"
+      },
+      {
+        "capability": "calendar:settings",
+        "label": "Manage calendar settings",
+        "description": "Read and save calendar display preferences, categories, defaults, and user settings.",
+        "required": false,
+        "risk": "medium"
+      },
+      {
+        "capability": "calendar:audit",
+        "label": "Read calendar activity",
+        "description": "Read sanitized host audit and activity projections for calendar actions.",
+        "required": false,
+        "risk": "high"
+      }
+    ],
+    "tools": [
+      {
+        "name": "get_calendar_capabilities",
+        "description": "Read calendar permissions, policy, and host-effect availability.",
+        "input_schema": {
+          "$ref": "plugin.json#/definitions/GetCalendarCapabilitiesInput"
+        },
+        "output_schema": {
+          "$ref": "plugin.json#/definitions/ResultEnvelope"
+        }
+      },
+      {
+        "name": "list_calendars",
+        "description": "List visible host-managed calendars.",
+        "input_schema": {
+          "$ref": "plugin.json#/definitions/ListCalendarsInput"
+        },
+        "output_schema": {
+          "$ref": "plugin.json#/definitions/ResultEnvelope"
+        }
+      },
+      {
+        "name": "save_calendar",
+        "description": "Plan host-owned calendar metadata save.",
+        "input_schema": {
+          "$ref": "plugin.json#/definitions/SaveCalendarInput"
+        },
+        "output_schema": {
+          "$ref": "plugin.json#/definitions/ResultEnvelope"
+        }
+      },
+      {
+        "name": "delete_calendar",
+        "description": "Plan host-owned calendar delete, hide, or unsubscribe.",
+        "input_schema": {
+          "$ref": "plugin.json#/definitions/DeleteCalendarInput"
+        },
+        "output_schema": {
+          "$ref": "plugin.json#/definitions/ResultEnvelope"
+        }
+      },
+      {
+        "name": "set_calendar_view_state",
+        "description": "Plan saving calendar view state.",
+        "input_schema": {
+          "$ref": "plugin.json#/definitions/SetCalendarViewStateInput"
+        },
+        "output_schema": {
+          "$ref": "plugin.json#/definitions/ResultEnvelope"
+        }
+      },
+      {
+        "name": "list_events",
+        "description": "Read event range projections from host snapshots.",
+        "input_schema": {
+          "$ref": "plugin.json#/definitions/ListEventsInput"
+        },
+        "output_schema": {
+          "$ref": "plugin.json#/definitions/ResultEnvelope"
+        }
+      },
+      {
+        "name": "get_event",
+        "description": "Read one event projection.",
+        "input_schema": {
+          "$ref": "plugin.json#/definitions/GetEventInput"
+        },
+        "output_schema": {
+          "$ref": "plugin.json#/definitions/ResultEnvelope"
+        }
+      },
+      {
+        "name": "search_events",
+        "description": "Search supplied event projections.",
+        "input_schema": {
+          "$ref": "plugin.json#/definitions/SearchEventsInput"
+        },
+        "output_schema": {
+          "$ref": "plugin.json#/definitions/ResultEnvelope"
+        }
+      },
+      {
+        "name": "validate_event_draft",
+        "description": "Validate and normalize event drafts without mutation.",
+        "input_schema": {
+          "$ref": "plugin.json#/definitions/ValidateEventDraftInput"
+        },
+        "output_schema": {
+          "$ref": "plugin.json#/definitions/ResultEnvelope"
+        }
+      },
+      {
+        "name": "create_event",
+        "description": "Plan event creation and optional invite/reminder/conference host effects.",
+        "input_schema": {
+          "$ref": "plugin.json#/definitions/CreateEventInput"
+        },
+        "output_schema": {
+          "$ref": "plugin.json#/definitions/ResultEnvelope"
+        }
+      },
+      {
+        "name": "update_event",
+        "description": "Plan event update host effects.",
+        "input_schema": {
+          "$ref": "plugin.json#/definitions/UpdateEventInput"
+        },
+        "output_schema": {
+          "$ref": "plugin.json#/definitions/ResultEnvelope"
+        }
+      },
+      {
+        "name": "delete_event",
+        "description": "Plan event delete or cancellation host effects.",
+        "input_schema": {
+          "$ref": "plugin.json#/definitions/DeleteEventInput"
+        },
+        "output_schema": {
+          "$ref": "plugin.json#/definitions/ResultEnvelope"
+        }
+      },
+      {
+        "name": "copy_event",
+        "description": "Plan copying an event to another calendar.",
+        "input_schema": {
+          "$ref": "plugin.json#/definitions/CopyEventInput"
+        },
+        "output_schema": {
+          "$ref": "plugin.json#/definitions/ResultEnvelope"
+        }
+      },
+      {
+        "name": "move_event",
+        "description": "Plan moving an event to another calendar.",
+        "input_schema": {
+          "$ref": "plugin.json#/definitions/MoveEventInput"
+        },
+        "output_schema": {
+          "$ref": "plugin.json#/definitions/ResultEnvelope"
+        }
+      },
+      {
+        "name": "validate_recurrence",
+        "description": "Validate provider-safe recurrence without host I/O.",
+        "input_schema": {
+          "$ref": "plugin.json#/definitions/ValidateRecurrenceInput"
+        },
+        "output_schema": {
+          "$ref": "plugin.json#/definitions/ResultEnvelope"
+        }
+      },
+      {
+        "name": "preview_recurrence",
+        "description": "Preview recurrence occurrences deterministically in Wasm.",
+        "input_schema": {
+          "$ref": "plugin.json#/definitions/PreviewRecurrenceInput"
+        },
+        "output_schema": {
+          "$ref": "plugin.json#/definitions/ResultEnvelope"
+        }
+      },
+      {
+        "name": "plan_free_busy_lookup",
+        "description": "Plan host-owned free/busy lookup.",
+        "input_schema": {
+          "$ref": "plugin.json#/definitions/PlanFreeBusyLookupInput"
+        },
+        "output_schema": {
+          "$ref": "plugin.json#/definitions/ResultEnvelope"
+        }
+      },
+      {
+        "name": "suggest_meeting_times",
+        "description": "Score suggested meeting times from supplied snapshots without host I/O.",
+        "input_schema": {
+          "$ref": "plugin.json#/definitions/SuggestMeetingTimesInput"
+        },
+        "output_schema": {
+          "$ref": "plugin.json#/definitions/ResultEnvelope"
+        }
+      },
+      {
+        "name": "search_rooms",
+        "description": "Plan host-owned room/resource lookup.",
+        "input_schema": {
+          "$ref": "plugin.json#/definitions/SearchRoomsInput"
+        },
+        "output_schema": {
+          "$ref": "plugin.json#/definitions/ResultEnvelope"
+        }
+      },
+      {
+        "name": "resolve_attendees",
+        "description": "Normalize attendees and optionally plan host contact lookup.",
+        "input_schema": {
+          "$ref": "plugin.json#/definitions/ResolveAttendeesInput"
+        },
+        "output_schema": {
+          "$ref": "plugin.json#/definitions/ResultEnvelope"
+        }
+      },
+      {
+        "name": "list_invitations",
+        "description": "Read host-managed invitation projections.",
+        "input_schema": {
+          "$ref": "plugin.json#/definitions/ListInvitationsInput"
+        },
+        "output_schema": {
+          "$ref": "plugin.json#/definitions/ResultEnvelope"
+        }
+      },
+      {
+        "name": "get_invitation",
+        "description": "Read one invitation projection.",
+        "input_schema": {
+          "$ref": "plugin.json#/definitions/GetInvitationInput"
+        },
+        "output_schema": {
+          "$ref": "plugin.json#/definitions/ResultEnvelope"
+        }
+      },
+      {
+        "name": "respond_to_invitation",
+        "description": "Plan host-owned RSVP effects.",
+        "input_schema": {
+          "$ref": "plugin.json#/definitions/RespondToInvitationInput"
+        },
+        "output_schema": {
+          "$ref": "plugin.json#/definitions/ResultEnvelope"
+        }
+      },
+      {
+        "name": "propose_new_time",
+        "description": "Plan host-owned proposed-time RSVP effects.",
+        "input_schema": {
+          "$ref": "plugin.json#/definitions/ProposeNewTimeInput"
+        },
+        "output_schema": {
+          "$ref": "plugin.json#/definitions/ResultEnvelope"
+        }
+      },
+      {
+        "name": "list_categories",
+        "description": "Read calendar category projections.",
+        "input_schema": {
+          "$ref": "plugin.json#/definitions/ListCategoriesInput"
+        },
+        "output_schema": {
+          "$ref": "plugin.json#/definitions/ResultEnvelope"
+        }
+      },
+      {
+        "name": "save_category",
+        "description": "Plan saving a calendar category.",
+        "input_schema": {
+          "$ref": "plugin.json#/definitions/SaveCategoryInput"
+        },
+        "output_schema": {
+          "$ref": "plugin.json#/definitions/ResultEnvelope"
+        }
+      },
+      {
+        "name": "delete_category",
+        "description": "Plan category deletion or reassignment.",
+        "input_schema": {
+          "$ref": "plugin.json#/definitions/DeleteCategoryInput"
+        },
+        "output_schema": {
+          "$ref": "plugin.json#/definitions/ResultEnvelope"
+        }
+      },
+      {
+        "name": "bulk_update_events",
+        "description": "Plan confirmed bulk event updates.",
+        "input_schema": {
+          "$ref": "plugin.json#/definitions/BulkUpdateEventsInput"
+        },
+        "output_schema": {
+          "$ref": "plugin.json#/definitions/ResultEnvelope"
+        }
+      },
+      {
+        "name": "get_sharing_state",
+        "description": "Read sharing and delegate projections.",
+        "input_schema": {
+          "$ref": "plugin.json#/definitions/GetSharingStateInput"
+        },
+        "output_schema": {
+          "$ref": "plugin.json#/definitions/ResultEnvelope"
+        }
+      },
+      {
+        "name": "update_sharing",
+        "description": "Plan host-owned sharing or delegate changes.",
+        "input_schema": {
+          "$ref": "plugin.json#/definitions/UpdateSharingInput"
+        },
+        "output_schema": {
+          "$ref": "plugin.json#/definitions/ResultEnvelope"
+        }
+      },
+      {
+        "name": "accept_shared_calendar",
+        "description": "Plan accepting a host-owned shared calendar invitation.",
+        "input_schema": {
+          "$ref": "plugin.json#/definitions/AcceptSharedCalendarInput"
+        },
+        "output_schema": {
+          "$ref": "plugin.json#/definitions/ResultEnvelope"
+        }
+      },
+      {
+        "name": "subscribe_calendar",
+        "description": "Plan host-owned Internet Calendar subscription sync.",
+        "input_schema": {
+          "$ref": "plugin.json#/definitions/SubscribeCalendarInput"
+        },
+        "output_schema": {
+          "$ref": "plugin.json#/definitions/ResultEnvelope"
+        }
+      },
+      {
+        "name": "get_reminder_state",
+        "description": "Read host reminder state projections.",
+        "input_schema": {
+          "$ref": "plugin.json#/definitions/GetReminderStateInput"
+        },
+        "output_schema": {
+          "$ref": "plugin.json#/definitions/ResultEnvelope"
+        }
+      },
+      {
+        "name": "snooze_or_dismiss_reminder",
+        "description": "Plan host reminder snooze or dismiss effects.",
+        "input_schema": {
+          "$ref": "plugin.json#/definitions/SnoozeOrDismissReminderInput"
+        },
+        "output_schema": {
+          "$ref": "plugin.json#/definitions/ResultEnvelope"
+        }
+      },
+      {
+        "name": "get_user_preferences",
+        "description": "Read calendar preferences.",
+        "input_schema": {
+          "$ref": "plugin.json#/definitions/GetUserPreferencesInput"
+        },
+        "output_schema": {
+          "$ref": "plugin.json#/definitions/ResultEnvelope"
+        }
+      },
+      {
+        "name": "save_user_preferences",
+        "description": "Plan saving calendar preferences.",
+        "input_schema": {
+          "$ref": "plugin.json#/definitions/SaveUserPreferencesInput"
+        },
+        "output_schema": {
+          "$ref": "plugin.json#/definitions/ResultEnvelope"
+        }
+      },
+      {
+        "name": "get_offline_state",
+        "description": "Read host offline cache state projection.",
+        "input_schema": {
+          "$ref": "plugin.json#/definitions/GetOfflineStateInput"
+        },
+        "output_schema": {
+          "$ref": "plugin.json#/definitions/ResultEnvelope"
+        }
+      },
+      {
+        "name": "get_activity_log",
+        "description": "Read sanitized host audit projections.",
+        "input_schema": {
+          "$ref": "plugin.json#/definitions/GetActivityLogInput"
+        },
+        "output_schema": {
+          "$ref": "plugin.json#/definitions/ResultEnvelope"
+        }
+      }
+    ],
+    "ui": {
+      "entrypoint": "ui/dist/index.html",
+      "contributions": [
+        {
+          "type": "navigation_item",
+          "id": "calendar-management.nav",
+          "label": "Calendar",
+          "target": "app://calendar-management/calendar",
+          "page_layout_schema": {
+            "layout": "calendar-workspace",
+            "components": [
+              {
+                "type": "CalendarWorkspace",
+                "id": "calendar-management.workspace",
+                "variant": "outlook-inspired",
+                "required_capabilities": [
+                  "calendar:read"
+                ],
+                "optional_capabilities": [
+                  "calendar:write",
+                  "calendar:invite",
+                  "calendar:respond",
+                  "calendar:share",
+                  "calendar:delegate",
+                  "calendar:settings",
+                  "calendar:audit"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "resource_limits": {
+      "memory_bytes": 67108864,
+      "timeout_ms": 4000
+    }
+  }
+}
