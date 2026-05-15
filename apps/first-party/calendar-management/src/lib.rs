@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
+use std::collections::BTreeMap;
 use std::ffi::{c_char, CString};
 
 const MAX_TITLE_CHARS: usize = 512;
@@ -171,15 +172,32 @@ impl WarningMessage {
 }
 
 #[derive(Serialize, Debug, Clone)]
-struct HostEffect {
-    effect: &'static str,
-    intent: String,
-    payload: Value,
-    idempotency_key: String,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    depends_on: Vec<String>,
-    on_failure: &'static str,
-    audit: Value,
+#[serde(untagged)]
+enum HostEffect {
+    PutDocument {
+        #[serde(rename = "type")]
+        effect_type: &'static str,
+        collection: String,
+        doc_id: String,
+        data: Value,
+    },
+    QueryDocuments {
+        #[serde(rename = "type")]
+        effect_type: &'static str,
+        collection: String,
+        filters: BTreeMap<String, String>,
+        limit: i32,
+    },
+    Planner {
+        effect: &'static str,
+        intent: String,
+        payload: Value,
+        idempotency_key: String,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        depends_on: Vec<String>,
+        on_failure: &'static str,
+        audit: Value,
+    },
 }
 
 #[derive(Serialize, Debug, Clone)]
@@ -302,19 +320,6 @@ fn require_effects(
     Ok(())
 }
 
-fn optional_effect(
-    context: &RequestContext,
-    operation: &'static str,
-    effect: &'static str,
-    intent: &str,
-    payload: Value,
-    risk: &'static str,
-) -> Option<HostEffect> {
-    context
-        .has_effect(effect)
-        .then(|| build_effect(context, operation, effect, intent, payload, risk))
-}
-
 fn build_effect(
     context: &RequestContext,
     operation: &'static str,
@@ -329,7 +334,7 @@ fn build_effect(
         "agent_id": context.agent_id,
         "correlation_id": context.audit_correlation_id,
     });
-    HostEffect {
+    HostEffect::Planner {
         effect,
         intent: intent.to_string(),
         idempotency_key: context.idempotency_key(operation, effect, &payload),
@@ -337,6 +342,44 @@ fn build_effect(
         depends_on: Vec::new(),
         on_failure: "abort_remaining",
         audit,
+    }
+}
+
+fn put_event_document_effect(event: &Value) -> HostEffect {
+    HostEffect::PutDocument {
+        effect_type: "put_document",
+        collection: "events".to_string(),
+        doc_id: event
+            .get("event_id")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        data: event.clone(),
+    }
+}
+
+fn query_events_effect(request: &Value) -> HostEffect {
+    let mut filters = BTreeMap::new();
+    if let Some(calendar_id) = request
+        .get("calendar_ids")
+        .and_then(Value::as_array)
+        .and_then(|items| items.first())
+        .and_then(Value::as_str)
+    {
+        filters.insert("calendar_id".to_string(), calendar_id.to_string());
+    }
+
+    let limit = request
+        .pointer("/pagination/limit")
+        .and_then(Value::as_i64)
+        .unwrap_or(100)
+        .clamp(1, 1000) as i32;
+
+    HostEffect::QueryDocuments {
+        effect_type: "query_documents",
+        collection: "events".to_string(),
+        filters,
+        limit,
     }
 }
 
@@ -933,6 +976,64 @@ fn read_snapshot_object(request: &Value, field: &str) -> Value {
     request.get(field).cloned().unwrap_or_else(|| json!({}))
 }
 
+fn read_document_events(request: &Value) -> Vec<Value> {
+    request
+        .pointer("/host_results/documents")
+        .and_then(Value::as_array)
+        .or_else(|| {
+            request
+                .pointer("/host_results/0/documents")
+                .and_then(Value::as_array)
+        })
+        .into_iter()
+        .flatten()
+        .filter_map(|document| document.get("data").cloned())
+        .collect()
+}
+
+fn current_event_for_update(request: &Value, event_id: &str) -> Result<Option<Value>, ErrorResponse> {
+    if let Some(existing_event) = request.get("existing_event") {
+        let existing_id = existing_event.get("event_id").and_then(Value::as_str);
+        if existing_id != Some(event_id) {
+            return Err(ErrorResponse::new(
+                "InvalidInput",
+                "existing_event.event_id must match event_id for update persistence.",
+            ));
+        }
+        return Ok(Some(existing_event.clone()));
+    }
+
+    Ok(read_snapshot_array(request, "snapshot").into_iter().find(|event| {
+        event.get("event_id").and_then(Value::as_str) == Some(event_id)
+    }))
+}
+
+fn merge_event_patch(mut event: Value, patch: &Value) -> Value {
+    if let (Some(event_object), Some(patch_object)) = (event.as_object_mut(), patch.as_object()) {
+        for (key, value) in patch_object {
+            if key != "unset_fields" {
+                event_object.insert(key.clone(), value.clone());
+            }
+        }
+        if let Some(unset_fields) = patch.get("unset_fields").and_then(Value::as_array) {
+            for field in unset_fields.iter().filter_map(Value::as_str) {
+                event_object.remove(field);
+            }
+        }
+    }
+    event
+}
+
+fn event_id_for_create(request: &Value, draft: &Value) -> Result<String, ErrorResponse> {
+    if let Some(event_id) = draft.get("event_id").and_then(Value::as_str) {
+        if !event_id.trim().is_empty() {
+            return Ok(event_id.to_string());
+        }
+    }
+    let client_operation_id = require_non_empty_str(request, "client_operation_id")?;
+    Ok(format!("evt_{}", hash_text(client_operation_id)))
+}
+
 fn base_preferences(context: &RequestContext) -> Value {
     json!({
         "default_view": "work_week",
@@ -1153,7 +1254,6 @@ fn handle_set_calendar_view_state(request: &Value) -> Result<OperationResponse, 
 fn handle_list_events(request: &Value) -> Result<OperationResponse, ErrorResponse> {
     let context = RequestContext::from_request(request)?;
     require_permission(&context, Permission::Read)?;
-    require_effect(&context, EFFECT_CALENDAR_STORE_READ)?;
     let range = require_field(request, "range")?;
     validate_time_range(range, "range")?;
     let calendar_ids = require_array(request, "calendar_ids")?;
@@ -1167,8 +1267,19 @@ fn handle_list_events(request: &Value) -> Result<OperationResponse, ErrorRespons
         .get("projection")
         .and_then(Value::as_str)
         .unwrap_or("full");
-    let events: Vec<Value> = read_snapshot_array(request, "snapshot")
+    let persisted_events = read_document_events(request);
+    let source_events = if persisted_events.is_empty() {
+        read_snapshot_array(request, "snapshot")
+    } else {
+        persisted_events
+    };
+    let events: Vec<Value> = source_events
         .into_iter()
+        .filter(|event| {
+            calendar_ids.iter().any(|calendar_id| {
+                calendar_id.as_str() == event.get("calendar_id").and_then(Value::as_str)
+            })
+        })
         .map(|event| project_event(&event, projection))
         .collect();
     Ok(ok(
@@ -1180,7 +1291,7 @@ fn handle_list_events(request: &Value) -> Result<OperationResponse, ErrorRespons
             "sync_state": { "state": if get_bool(request, "refresh", false) { "syncing" } else { "current" } },
             "warnings": []
         }),
-        Vec::new(),
+        vec![query_events_effect(request)],
     ))
 }
 
@@ -1289,7 +1400,6 @@ fn handle_validate_event_draft(request: &Value) -> Result<OperationResponse, Err
 fn handle_create_event(request: &Value) -> Result<OperationResponse, ErrorResponse> {
     let context = RequestContext::from_request(request)?;
     require_permission(&context, Permission::Write)?;
-    require_effect(&context, EFFECT_CALENDAR_STORE_WRITE)?;
     let draft = require_field(request, "draft")?;
     let (valid, normalized_draft, field_errors, warnings, required_actions) =
         validate_event_draft_value(draft);
@@ -1302,17 +1412,10 @@ fn handle_create_event(request: &Value) -> Result<OperationResponse, ErrorRespon
                 })),
         );
     }
-    let mut effects = vec![build_effect(
-        &context,
-        "create_event",
-        EFFECT_CALENDAR_STORE_WRITE,
-        "Create calendar event in host store",
-        json!({
-            "draft": normalized_draft,
-            "client_operation_id": request.get("client_operation_id").cloned().unwrap_or(Value::Null)
-        }),
-        "high",
-    )];
+    let mut persisted_draft = normalized_draft.clone();
+    persisted_draft["event_id"] = json!(event_id_for_create(request, &normalized_draft)?);
+    let event_preview = event_from_draft(&persisted_draft, &context, "create_event");
+    let mut effects = vec![put_event_document_effect(&event_preview)];
     let send_invites = get_bool(request, "send_invites", false);
     let is_meeting = normalized_draft.get("kind").and_then(Value::as_str) == Some("meeting");
     if send_invites || is_meeting {
@@ -1357,20 +1460,10 @@ fn handle_create_event(request: &Value) -> Result<OperationResponse, ErrorRespon
             "medium",
         ));
     }
-    if let Some(audit) = optional_effect(
-        &context,
-        "create_event",
-        EFFECT_AUDIT_WRITE,
-        "Write host audit projection for calendar creation",
-        json!({ "event_preview": event_from_draft(&normalized_draft, &context, "create_event") }),
-        "high",
-    ) {
-        effects.push(audit);
-    }
     Ok(ok_with_warnings(
         "create_event",
         json!({
-            "event_preview": event_from_draft(&normalized_draft, &context, "create_event"),
+            "event_preview": event_preview,
             "persistence_status": "planned",
             "notification_state": if send_invites || is_meeting { "planned" } else { "none" },
             "requires_host_execution": true
@@ -1383,9 +1476,27 @@ fn handle_create_event(request: &Value) -> Result<OperationResponse, ErrorRespon
 fn handle_update_event(request: &Value) -> Result<OperationResponse, ErrorResponse> {
     let context = RequestContext::from_request(request)?;
     require_permission(&context, Permission::Write)?;
-    require_effect(&context, EFFECT_CALENDAR_STORE_WRITE)?;
     let event_id = require_non_empty_str(request, "event_id")?;
     let patch = require_field(request, "patch")?.clone();
+    let current_event = current_event_for_update(request, event_id)?.ok_or_else(|| {
+        ErrorResponse::new(
+            "InvalidInput",
+            "existing_event or a matching snapshot event is required so updates can persist a complete event document.",
+        )
+    })?;
+    let mut merged_event = merge_event_patch(current_event, &patch);
+    merged_event["event_id"] = json!(event_id);
+    let (valid, normalized_event, field_errors, warnings, required_actions) =
+        validate_event_draft_value(&merged_event);
+    if !valid {
+        return Err(
+            ErrorResponse::new("InvalidInput", "Event update is not valid for persistence.")
+                .with_details(json!({
+                    "field_errors": field_errors,
+                    "required_actions": required_actions
+                })),
+        );
+    }
     let scope = optional_enum_str(request, "scope", "single", EVENT_SCOPES)?;
     let notification_scope = optional_enum_str(
         request,
@@ -1393,20 +1504,7 @@ fn handle_update_event(request: &Value) -> Result<OperationResponse, ErrorRespon
         "host_default",
         NOTIFICATION_SCOPES,
     )?;
-    let mut effects = vec![build_effect(
-        &context,
-        "update_event",
-        EFFECT_CALENDAR_STORE_WRITE,
-        "Update calendar event in host store",
-        json!({
-            "event_id": event_id,
-            "occurrence_id": request.get("occurrence_id").cloned().unwrap_or(Value::Null),
-            "scope": scope,
-            "patch": patch,
-            "revision": request.get("revision").cloned().unwrap_or(Value::Null)
-        }),
-        "high",
-    )];
+    let mut effects = vec![put_event_document_effect(&normalized_event)];
     if notification_scope != "none"
         && (patch.get("attendees").is_some() || patch.get("title").is_some())
     {
@@ -1421,16 +1519,18 @@ fn handle_update_event(request: &Value) -> Result<OperationResponse, ErrorRespon
             "critical",
         ));
     }
-    Ok(ok(
+    Ok(ok_with_warnings(
         "update_event",
         json!({
-            "event_preview": { "event_id": event_id, "patch": patch, "planning_state": "updated_by_host" },
+            "event_preview": normalized_event,
+            "scope": scope,
             "attendee_delta": { "requires_host_diff": true },
             "notification_state": { "scope": notification_scope, "state": if effects.len() > 1 { "planned" } else { "none" } },
             "conflict_state": { "requires_host_revision_check": request.get("revision").is_some() },
             "requires_host_execution": true
         }),
         effects,
+        warnings,
     ))
 }
 
@@ -3030,10 +3130,12 @@ mod tests {
             "create_event" => {
                 request["draft"] = base_event();
                 request["send_invites"] = json!(true);
+                request["client_operation_id"] = json!("create_evt_1");
             }
             "update_event" => {
                 request["event_id"] = json!("evt_1");
                 request["patch"] = json!({ "title": "Updated" });
+                request["existing_event"] = base_event();
                 request["scope"] = json!("single");
                 request["notification_scope"] = json!("none");
             }
@@ -3265,13 +3367,160 @@ mod tests {
             .unwrap();
         assert!(effects
             .iter()
-            .any(|effect| effect.get("effect").and_then(Value::as_str)
-                == Some(EFFECT_CALENDAR_STORE_WRITE)));
-        assert!(effects.iter().all(|effect| effect
-            .get("idempotency_key")
+            .any(|effect| effect.get("type").and_then(Value::as_str) == Some("put_document")));
+        assert!(effects
+            .iter()
+            .filter_map(|effect| effect.get("idempotency_key").and_then(Value::as_str))
+            .all(|key| key.contains("req_456")));
+    }
+
+    #[test]
+    fn create_event_emits_put_document_for_events_collection() {
+        let mut request = success_request("create_event");
+        request["context"] = context("write");
+        request["draft"]["kind"] = json!("appointment");
+        request["draft"]["attendees"] = json!([]);
+        request["draft"]["reminders"] = json!([]);
+        request["send_invites"] = json!(false);
+
+        let response = call("create_event", request);
+        let effects = response
+            .pointer("/ok/host_effects")
+            .and_then(Value::as_array)
+            .unwrap();
+        assert_eq!(
+            effects.len(),
+            1,
+            "basic appointment save should only persist the event: {response}"
+        );
+        let effect = &effects[0];
+        assert_eq!(effect.get("type").and_then(Value::as_str), Some("put_document"));
+        assert_eq!(effect.get("collection").and_then(Value::as_str), Some("events"));
+        assert_eq!(effect.pointer("/data/title").and_then(Value::as_str), Some("Planning"));
+        assert_eq!(effect.pointer("/data/calendar_id").and_then(Value::as_str), Some("cal_1"));
+        assert!(effect.pointer("/data/event_id").and_then(Value::as_str).is_some());
+        assert!(effects.iter().all(|effect| {
+            effect.get("effect").and_then(Value::as_str) != Some(EFFECT_CALENDAR_STORE_WRITE)
+        }));
+    }
+
+    #[test]
+    fn create_event_invalid_draft_emits_no_persistence_effects() {
+        let mut request = success_request("create_event");
+        request["draft"]["calendar_id"] = json!("");
+
+        let response = call("create_event", request);
+        assert_err_code(response, "InvalidInput");
+    }
+
+    #[test]
+    fn update_event_emits_put_document_with_complete_merged_document() {
+        let mut request = success_request("update_event");
+        request["patch"] = json!({ "title": "Updated", "location": "Room B" });
+
+        let response = call("update_event", request);
+        let effect = response.pointer("/ok/host_effects/0").unwrap();
+        assert_eq!(effect.get("type").and_then(Value::as_str), Some("put_document"));
+        assert_eq!(effect.get("collection").and_then(Value::as_str), Some("events"));
+        assert_eq!(effect.get("doc_id").and_then(Value::as_str), Some("evt_1"));
+        assert_eq!(effect.pointer("/data/title").and_then(Value::as_str), Some("Updated"));
+        assert_eq!(effect.pointer("/data/location").and_then(Value::as_str), Some("Room B"));
+        assert_eq!(effect.pointer("/data/calendar_id").and_then(Value::as_str), Some("cal_1"));
+        assert_eq!(
+            effect.pointer("/data/start").and_then(Value::as_str),
+            Some("2026-05-08T09:00:00Z")
+        );
+        assert_eq!(
+            effect.pointer("/data/time_zone").and_then(Value::as_str),
+            Some("Europe/Berlin")
+        );
+        assert!(effect.pointer("/data/attendees").and_then(Value::as_array).is_some());
+    }
+
+    #[test]
+    fn update_event_rejects_patch_without_current_document() {
+        let mut request = success_request("update_event");
+        request.as_object_mut().unwrap().remove("existing_event");
+
+        let response = call("update_event", request);
+        assert_err_code(response, "InvalidInput");
+    }
+
+    #[test]
+    fn create_event_uses_client_operation_id_for_distinct_new_event_ids() {
+        let mut first = success_request("create_event");
+        first["draft"].as_object_mut().unwrap().remove("event_id");
+        first["draft"]["kind"] = json!("appointment");
+        first["draft"]["attendees"] = json!([]);
+        first["draft"]["reminders"] = json!([]);
+        first["send_invites"] = json!(false);
+        first["client_operation_id"] = json!("client_create_1");
+
+        let mut second = first.clone();
+        second["client_operation_id"] = json!("client_create_2");
+
+        let first_response = call("create_event", first);
+        let second_response = call("create_event", second);
+        let first_doc_id = first_response
+            .pointer("/ok/host_effects/0/doc_id")
             .and_then(Value::as_str)
-            .unwrap()
-            .contains("req_456")));
+            .unwrap();
+        let second_doc_id = second_response
+            .pointer("/ok/host_effects/0/doc_id")
+            .and_then(Value::as_str)
+            .unwrap();
+        assert_ne!(first_doc_id, second_doc_id);
+    }
+
+    #[test]
+    fn create_event_rejects_new_event_without_unique_client_operation_id() {
+        let mut request = success_request("create_event");
+        request["draft"].as_object_mut().unwrap().remove("event_id");
+        request.as_object_mut().unwrap().remove("client_operation_id");
+
+        let response = call("create_event", request);
+        assert_err_code(response, "InvalidInput");
+    }
+
+    #[test]
+    fn update_event_rejects_mismatched_existing_event() {
+        let mut request = success_request("update_event");
+        request["existing_event"]["event_id"] = json!("evt_other");
+
+        let response = call("update_event", request);
+        assert_err_code(response, "InvalidInput");
+    }
+
+    #[test]
+    fn list_events_emits_query_documents_for_events_collection() {
+        let response = call("list_events", success_request("list_events"));
+        let effect = response.pointer("/ok/host_effects/0").unwrap();
+        assert_eq!(effect.get("type").and_then(Value::as_str), Some("query_documents"));
+        assert_eq!(effect.get("collection").and_then(Value::as_str), Some("events"));
+        assert_eq!(
+            effect.pointer("/filters/calendar_id").and_then(Value::as_str),
+            Some("cal_1")
+        );
+        assert!(effect.pointer("/filters/user_id").is_none());
+        assert!(effect.pointer("/filters/principal_id").is_none());
+    }
+
+    #[test]
+    fn list_events_projects_host_results_documents() {
+        let mut request = success_request("list_events");
+        request.as_object_mut().unwrap().remove("snapshot");
+        request["host_results"] = json!({
+            "documents": [{
+                "doc_id": "evt_persisted",
+                "data": { "event_id": "evt_persisted", "calendar_id": "cal_1", "kind": "appointment", "status": "confirmed", "title": "Persisted planning", "start": "2026-05-08T11:00:00Z", "end": "2026-05-08T12:00:00Z", "all_day": false, "time_zone": "Europe/Berlin", "availability": "busy", "privacy": "normal" }
+            }]
+        });
+
+        let response = call("list_events", request);
+        assert_eq!(
+            response.pointer("/ok/data/events/0/title").and_then(Value::as_str),
+            Some("Persisted planning")
+        );
     }
 
     #[test]

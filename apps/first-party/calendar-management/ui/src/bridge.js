@@ -186,6 +186,8 @@ const STUB_CONTEXT = {
   permission: 'write',
   capabilities: ['calendar:read', 'calendar:write', 'calendar:invite', 'calendar:respond', 'calendar:share', 'calendar:settings', 'calendar:audit'],
   available_effects: [
+    'put_document',
+    'query_documents',
     'CalendarStoreRead',
     'CalendarStoreWrite',
     'CalendarStoreDelete',
@@ -225,12 +227,18 @@ const STUB_RESPONSES = {
   save_calendar: (payload) => ok('save_calendar', { calendar: payload.calendar || SAMPLE_CALENDARS[0], created: Boolean(payload.create), updated: !payload.create }, [{ effect: 'CalendarStoreWrite' }]),
   delete_calendar: (payload) => ok('delete_calendar', { calendar_id: payload.calendar_id, deletion_mode: payload.mode || 'hide', event_outcome: 'events_preserved', requires_confirmation: false }, [{ effect: 'CalendarStoreDelete' }]),
   set_calendar_view_state: (payload) => ok('set_calendar_view_state', { view_state: payload.view_state, normalized: true }, [{ effect: 'CalendarStoreWrite' }]),
-  list_events: (payload) => ok('list_events', { events: SAMPLE_EVENTS, range: payload.range || {}, projection_applied: 'full', sync_state: { state: 'current' }, warnings: [] }),
+  list_events: (payload) => ok('list_events', { events: SAMPLE_EVENTS, range: payload.range || {}, projection_applied: 'full', sync_state: { state: 'current' }, warnings: [] }, [{ type: 'query_documents', collection: 'events', filters: {}, limit: 100 }]),
   get_event: (payload) => ok('get_event', { event: SAMPLE_EVENTS.find((event) => event.event_id === payload.event_id) || SAMPLE_EVENTS[0], projection_applied: 'full', allowed_actions: ['edit', 'copy', 'move', 'delete'], warnings: [] }),
   search_events: (payload) => ok('search_events', { results: SAMPLE_EVENTS.filter((event) => event.title.toLowerCase().includes((payload.query || '').toLowerCase())), facets: {}, pagination: {}, projection_applied: 'full' }),
   validate_event_draft: (payload) => ok('validate_event_draft', { valid: Boolean(payload.draft?.start && payload.draft?.end), normalized_draft: payload.draft, field_errors: [], warnings: [], required_actions: [] }),
-  create_event: (payload) => ok('create_event', { event_preview: { ...payload.draft, event_id: `evt-${Date.now()}` }, persistence_status: 'planned', notification_state: payload.send_invites ? 'planned' : 'none', requires_host_execution: true }, [{ effect: 'CalendarStoreWrite' }]),
-  update_event: (payload) => ok('update_event', { event_preview: { ...SAMPLE_EVENTS[0], ...payload.patch }, attendee_delta: {}, notification_state: { state: payload.notification_scope || 'host_default' }, conflict_state: { state: 'none' }, requires_host_execution: true }, [{ effect: 'CalendarStoreWrite' }]),
+  create_event: (payload) => {
+    const persisted = { ...payload.draft, event_id: payload.draft?.event_id || `evt-${Date.now()}`, status: 'confirmed', revision: 'dev-committed', created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+    return ok('create_event', { event_preview: persisted, persisted_event: persisted, persistence_status: 'committed', notification_state: payload.send_invites ? 'planned' : 'none', requires_host_execution: true }, [{ type: 'put_document', collection: 'events', doc_id: persisted.event_id, data: persisted }]);
+  },
+  update_event: (payload) => {
+    const persisted = { ...(payload.existing_event || SAMPLE_EVENTS[0]), ...payload.patch, updated_at: new Date().toISOString() };
+    return ok('update_event', { event_preview: persisted, persisted_event: persisted, attendee_delta: {}, notification_state: { state: payload.notification_scope || 'host_default' }, conflict_state: { state: 'none' }, requires_host_execution: true }, [{ type: 'put_document', collection: 'events', doc_id: persisted.event_id, data: persisted }]);
+  },
   delete_event: (payload) => ok('delete_event', { target: payload.target, scope: payload.scope, deletion_state: { state: 'planned' }, notification_state: { state: payload.mode === 'cancel' ? 'planned' : 'none' }, requires_host_execution: true }, [{ effect: 'CalendarStoreDelete' }]),
   copy_event: (payload) => ok('copy_event', { source_event_id: payload.event_id, new_event_preview: { ...SAMPLE_EVENTS[0], calendar_id: payload.destination_calendar_id }, requires_host_execution: true }, [{ effect: 'CalendarStoreWrite' }]),
   move_event: (payload) => ok('move_event', { event_preview: { ...SAMPLE_EVENTS[0], calendar_id: payload.destination_calendar_id }, source_calendar_id: 'cal-primary', destination_calendar_id: payload.destination_calendar_id, notification_state: {} }, [{ effect: 'CalendarStoreWrite' }]),

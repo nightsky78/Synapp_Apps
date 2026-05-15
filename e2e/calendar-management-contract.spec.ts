@@ -15,6 +15,7 @@ type PluginManifest = {
   hostEffects: {
     required: string[];
   };
+  definitions: Record<string, unknown>;
 };
 
 type AppManifest = {
@@ -143,6 +144,32 @@ test.describe('Calendar Management static app contract', () => {
     expect(workspace?.type).toBe('CalendarWorkspace');
     expect(workspace?.required_capabilities).toEqual(['calendar:read']);
     expect(workspace?.optional_capabilities).toEqual(['calendar:write', 'calendar:invite', 'calendar:respond', 'calendar:share', 'calendar:delegate', 'calendar:settings', 'calendar:audit']);
+  });
+
+  test('TC-SA-CAL-CONTRACT-004: basic event persistence uses generic document host effects', async () => {
+    const plugin = await readJson<PluginManifest>(path.join(calendarRoot, 'plugin.json'));
+    const appSource = await readFile(path.join(calendarRoot, 'ui', 'src', 'App.jsx'), 'utf8');
+    const bridgeSource = await readFile(path.join(calendarRoot, 'ui', 'src', 'bridge.js'), 'utf8');
+    const rustSource = await readFile(path.join(calendarRoot, 'src', 'lib.rs'), 'utf8');
+
+    expect(rustSource).toContain('effect_type: "put_document"');
+    expect(rustSource).toContain('effect_type: "query_documents"');
+    expect(rustSource).toContain('collection: "events".to_string()');
+    expect(rustSource).toContain('existing_event or a matching snapshot event is required');
+    expect(rustSource).toContain('fn create_event_emits_put_document_for_events_collection');
+    expect(rustSource).toContain('fn update_event_emits_put_document_with_complete_merged_document');
+    expect(rustSource).toContain('fn list_events_emits_query_documents_for_events_collection');
+    expect(rustSource).not.toContain('"Create calendar event in host store"');
+    expect(rustSource).not.toContain('"Update calendar event in host store"');
+
+    expect(appSource).toContain('existing_event: selectedEvent');
+    expect(bridgeSource).toContain("persistence_status: 'committed'");
+    expect(bridgeSource).toContain("type: 'put_document'");
+    expect(bridgeSource).toContain("type: 'query_documents'");
+
+    const hostEffectSchema = plugin.definitions.HostEffect;
+    expect(JSON.stringify(hostEffectSchema)).toContain('DocumentHostEffect');
+    expect(JSON.stringify(plugin.definitions.UpdateEventInput)).toContain('existing_event');
   });
 });
 

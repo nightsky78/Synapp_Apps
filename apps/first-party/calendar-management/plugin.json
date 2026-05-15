@@ -173,6 +173,25 @@
       ]
     },
     "HostEffect": {
+      "oneOf": [
+        { "$ref": "#/definitions/DocumentHostEffect" },
+        { "$ref": "#/definitions/PlannerHostEffect" }
+      ]
+    },
+    "DocumentHostEffect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "collection"],
+      "properties": {
+        "type": { "type": "string", "enum": ["put_document", "query_documents"] },
+        "collection": { "type": "string", "enum": ["events"] },
+        "doc_id": { "$ref": "#/definitions/HostId" },
+        "data": { "type": "object", "additionalProperties": true },
+        "filters": { "type": "object", "additionalProperties": { "type": "string" } },
+        "limit": { "type": "integer", "minimum": 1, "maximum": 1000 }
+      }
+    },
+    "PlannerHostEffect": {
       "type": "object",
       "additionalProperties": false,
       "required": ["effect", "intent", "payload", "idempotency_key"],
@@ -231,7 +250,7 @@
     "SearchEventsInput": { "allOf": [{ "$ref": "#/definitions/RequestEnvelope" }], "required": ["context", "query"], "properties": { "query": { "type": "string", "maxLength": 256 }, "filters": { "$ref": "#/definitions/HostObject" }, "pagination": { "$ref": "#/definitions/Pagination" }, "projection": { "$ref": "#/definitions/ProjectionLevel" }, "snapshot": { "type": "array", "items": { "$ref": "#/definitions/CalendarEvent" } }, "refresh": { "type": "boolean" } } },
     "ValidateEventDraftInput": { "allOf": [{ "$ref": "#/definitions/RequestEnvelope" }], "required": ["context", "draft"], "properties": { "draft": { "$ref": "#/definitions/EventDraft" }, "existing_event": { "$ref": "#/definitions/CalendarEvent" }, "policy_snapshot": { "$ref": "#/definitions/HostObject" } } },
     "CreateEventInput": { "allOf": [{ "$ref": "#/definitions/RequestEnvelope" }], "required": ["context", "draft", "send_invites"], "properties": { "draft": { "$ref": "#/definitions/EventDraft" }, "send_invites": { "type": "boolean" }, "confirmation": { "$ref": "#/definitions/Confirmation" }, "client_operation_id": { "$ref": "#/definitions/HostId" } } },
-    "UpdateEventInput": { "allOf": [{ "$ref": "#/definitions/RequestEnvelope" }], "required": ["context", "event_id", "patch", "scope", "notification_scope"], "properties": { "event_id": { "$ref": "#/definitions/HostId" }, "occurrence_id": { "$ref": "#/definitions/HostId" }, "patch": { "$ref": "#/definitions/EventPatch" }, "scope": { "type": "string", "enum": ["single", "occurrence", "this_and_following", "series"] }, "notification_scope": { "type": "string", "enum": ["none", "changed_attendees", "all_attendees", "host_default"] }, "revision": { "type": "string", "maxLength": 256 }, "confirmation": { "$ref": "#/definitions/Confirmation" } } },
+    "UpdateEventInput": { "allOf": [{ "$ref": "#/definitions/RequestEnvelope" }], "required": ["context", "event_id", "patch", "scope", "notification_scope"], "properties": { "event_id": { "$ref": "#/definitions/HostId" }, "occurrence_id": { "$ref": "#/definitions/HostId" }, "existing_event": { "$ref": "#/definitions/CalendarEvent" }, "snapshot": { "type": "array", "items": { "$ref": "#/definitions/CalendarEvent" } }, "patch": { "$ref": "#/definitions/EventPatch" }, "scope": { "type": "string", "enum": ["single", "occurrence", "this_and_following", "series"] }, "notification_scope": { "type": "string", "enum": ["none", "changed_attendees", "all_attendees", "host_default"] }, "revision": { "type": "string", "maxLength": 256 }, "confirmation": { "$ref": "#/definitions/Confirmation" } } },
     "DeleteEventInput": { "allOf": [{ "$ref": "#/definitions/RequestEnvelope" }], "required": ["context", "target", "scope", "mode"], "properties": { "target": { "$ref": "#/definitions/HostObject" }, "scope": { "type": "string", "enum": ["single", "occurrence", "this_and_following", "series"] }, "mode": { "type": "string", "enum": ["delete", "cancel"] }, "message": { "$ref": "#/definitions/BoundedText" }, "revision": { "type": "string", "maxLength": 256 }, "confirmation": { "$ref": "#/definitions/Confirmation" } } },
     "CopyEventInput": { "allOf": [{ "$ref": "#/definitions/RequestEnvelope" }], "required": ["context", "event_id", "destination_calendar_id"], "properties": { "event_id": { "$ref": "#/definitions/HostId" }, "destination_calendar_id": { "$ref": "#/definitions/HostId" }, "occurrence_id": { "$ref": "#/definitions/HostId" }, "copy_options": { "$ref": "#/definitions/HostObject" } } },
     "MoveEventInput": { "allOf": [{ "$ref": "#/definitions/RequestEnvelope" }], "required": ["context", "event_id", "destination_calendar_id"], "properties": { "event_id": { "$ref": "#/definitions/HostId" }, "destination_calendar_id": { "$ref": "#/definitions/HostId" }, "occurrence_id": { "$ref": "#/definitions/HostId" }, "revision": { "type": "string", "maxLength": 256 }, "notification_scope": { "type": "string", "enum": ["none", "changed_attendees", "all_attendees", "host_default"] } } },

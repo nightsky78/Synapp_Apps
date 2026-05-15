@@ -135,12 +135,27 @@ function App() {
   async function saveDraft(sendInvites = false) {
     const operation = selectedEvent ? 'update_event' : 'create_event';
     const payload = selectedEvent
-      ? { event_id: selectedEvent.event_id, patch: draft, scope: 'single', notification_scope: sendInvites ? 'all_attendees' : 'none', revision: selectedEvent.revision }
+      ? { event_id: selectedEvent.event_id, existing_event: selectedEvent, patch: draft, scope: 'single', notification_scope: sendInvites ? 'all_attendees' : 'none', revision: selectedEvent.revision }
       : { draft, send_invites: sendInvites, client_operation_id: `ui-${Date.now()}` };
-    const data = await runOperation(operation, payload, sendInvites ? 'Meeting invite planned.' : 'Event save planned.');
-    if (data?.event_preview) {
-      const preview = data.event_preview;
-      setEvents((current) => selectedEvent ? current.map((event) => event.event_id === selectedEvent.event_id ? { ...event, ...preview } : event) : [...current, { ...preview, event_id: preview.event_id || `evt-${Date.now()}`, status: 'draft', revision: 'ui-draft', created_at: new Date().toISOString(), updated_at: new Date().toISOString() }]);
+    const data = await runOperation(operation, payload, sendInvites ? 'Meeting save requested.' : 'Event save requested.');
+    if (!data) return;
+
+    const persistedEvent = data.persisted_event || data.event || (data.persistence_status === 'committed' ? data.event_preview : null);
+    if (persistedEvent?.event_id) {
+      setEvents((current) => selectedEvent ? current.map((event) => event.event_id === selectedEvent.event_id ? { ...event, ...persistedEvent } : event) : [...current, persistedEvent]);
+      setSelectedEventId(persistedEvent.event_id);
+      setActivePanel('detail');
+      setStatus({ loading: false, message: sendInvites ? 'Meeting saved.' : 'Event saved.', tone: 'success' });
+      return;
+    }
+
+    const refreshed = await runOperation('list_events', { range: { start: `${dateAnchor}T00:00:00+02:00`, end: '2026-05-11T00:00:00+02:00', time_zone: 'Europe/Berlin' }, calendar_ids: visibleCalendarIds, refresh: true }, 'Calendar refreshed.');
+    const previewId = data.event_preview?.event_id;
+    const confirmed = previewId && refreshed?.events?.some((event) => event.event_id === previewId);
+    setStatus({ loading: false, message: confirmed ? (sendInvites ? 'Meeting saved.' : 'Event saved.') : 'Save is pending host confirmation.', tone: confirmed ? 'success' : 'neutral' });
+    if (confirmed) {
+      setSelectedEventId(previewId);
+      setActivePanel('detail');
     }
   }
 
@@ -275,7 +290,7 @@ function SidebarSection({ title, children }) {
 
 function StatusBanner({ status, offlineState, openPanel }) {
   return (
-    <div className={`status-banner status-banner--${status.tone}`} role="status" aria-live="polite">
+    <div className={`status-banner status-banner--${status.tone}`} role="status" aria-live="polite" data-testid="calendar-status-banner">
       <span>{status.loading ? 'Working...' : status.message}</span>
       {offlineState && <button onClick={() => openPanel('activity')}>Offline: {offlineState.mutation_policy}</button>}
     </div>
@@ -427,7 +442,7 @@ function EventEditor({ draft, setDraft, calendars, categories, saveDraft, runOpe
     setDraft((current) => ({ ...current, [field]: value }));
   }
   return (
-    <section className="panel-body editor-form">
+    <section className="panel-body editor-form" data-testid="calendar-event-editor">
       <h1>Event editor</h1>
       <label>Title<input value={draft.title} onChange={(event) => update('title', event.target.value)} placeholder="Untitled event" /></label>
       <label>Calendar<select value={draft.calendar_id} onChange={(event) => update('calendar_id', event.target.value)}>{calendars.map((calendar) => <option key={calendar.calendar_id} value={calendar.calendar_id}>{calendar.display_name}</option>)}</select></label>
@@ -444,8 +459,8 @@ function EventEditor({ draft, setDraft, calendars, categories, saveDraft, runOpe
         <button onClick={() => runOperation('validate_recurrence', { event_time: { start: draft.start, end: draft.end, time_zone: draft.time_zone }, recurrence: { frequency: 'weekly', interval: 1, days_of_week: ['FR'], end: { mode: 'after_count', count: 8 }, time_zone: draft.time_zone } }, 'Recurrence validated.')}>Validate recurrence</button>
         <button onClick={() => runOperation('preview_recurrence', { event_time: { start: draft.start, end: draft.end, time_zone: draft.time_zone }, recurrence: { frequency: 'weekly', interval: 1, days_of_week: ['FR'], end: { mode: 'after_count', count: 8 }, time_zone: draft.time_zone }, limit: 5 }, 'Recurrence preview loaded.')}>Preview recurrence</button>
         <button onClick={openScheduling}>Scheduling</button>
-        <button className="primary-button" onClick={() => saveDraft(false)}>Save</button>
-        <button className="primary-button" onClick={() => saveDraft(true)}>Send invite</button>
+        <button className="primary-button" data-testid="calendar-save-button" onClick={() => saveDraft(false)}>Save</button>
+        <button className="primary-button" data-testid="calendar-send-invite-button" onClick={() => saveDraft(true)}>Send invite</button>
       </div>
     </section>
   );
