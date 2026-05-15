@@ -9,8 +9,8 @@
   "category": "productivity",
   "repository_url": "https://github.com/nightsky78/Synapp_Apps/",
   "package_url": "https://github.com/nightsky78/Synapp_Apps/releases/download/calendar-management-v0.1.0/calendar-management-0.1.0.tar.gz",
-  "package_sha256": "6484350a5e9e92b93ba64b1d49ccfdc8d777de22e4b597fa1f13f3991a38612f",
-  "manifest_sha256": "f6388f0573bdbf191d539876ac639c7dd9f60788f2e958a19663be73faa10be4",
+  "package_sha256": "5e56db24add6b6e67a44f7ebff02f44f3c72afc6ab8d362cdc33992df5edd494",
+  "manifest_sha256": "553a9088ac5741cdf3b3bbad7d52f49ba12c45ecda1303d25c1e6ee25c697a57",
   "signature": {
     "type": "metadata-only",
     "signer": "synapp-dev-catalog",
@@ -20,7 +20,7 @@
   "source": {
     "repository": "https://github.com/nightsky78/Synapp_Apps/",
     "directory": "apps/first-party/calendar-management",
-    "commit": "22e30376d07d17c90936d2068c496fb9cc33e57b"
+    "commit": "9ac91a011ae97a05b231f74dc9880e6700590984"
   },
   "manifest": {
     "$schema": "../../../catalog/schemas/package-manifest.schema.json",
@@ -49,7 +49,7 @@
         "capability": "calendar:write",
         "label": "Change calendars",
         "description": "Create, update, copy, move, and delete events, calendars, categories, preferences, and reminder projections through host effects.",
-        "required": false,
+        "required": true,
         "risk": "high"
       },
       {

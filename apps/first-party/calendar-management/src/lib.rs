@@ -3249,6 +3249,42 @@ mod tests {
     }
 
     #[test]
+    fn basic_event_save_requires_write_permission_and_returns_preview() {
+        let mut read_only_request = success_request("create_event");
+        read_only_request["context"] = context("read");
+        read_only_request["draft"]["kind"] = json!("appointment");
+        read_only_request["draft"]["attendees"] = json!([]);
+        read_only_request["draft"]["reminders"] = json!([]);
+        read_only_request["send_invites"] = json!(false);
+
+        let read_only_response = call("create_event", read_only_request);
+        assert_err_code(read_only_response, "PermissionDenied");
+
+        let mut write_request = success_request("create_event");
+        write_request["context"] = context("write");
+        write_request["draft"]["kind"] = json!("appointment");
+        write_request["draft"]["title"] = json!("Planning review");
+        write_request["draft"]["attendees"] = json!([]);
+        write_request["draft"]["reminders"] = json!([]);
+        write_request["send_invites"] = json!(false);
+
+        let write_response = call("create_event", write_request);
+        assert_eq!(
+            write_response
+                .pointer("/ok/data/event_preview/title")
+                .and_then(Value::as_str),
+            Some("Planning review"),
+            "write-capable save should return an event preview: {write_response}"
+        );
+        assert_eq!(
+            write_response
+                .pointer("/ok/data/persistence_status")
+                .and_then(Value::as_str),
+            Some("planned")
+        );
+    }
+
+    #[test]
     fn unavailable_required_effect_is_reported() {
         let mut request = success_request("plan_free_busy_lookup");
         request["context"]["available_effects"] = json!([EFFECT_CALENDAR_STORE_READ]);

@@ -15,7 +15,7 @@
   "entrypoint": "target/wasm32-wasip1/release/calendar_management.wasm",
   "capabilities": [
     { "capability": "calendar:read", "label": "Read calendars", "description": "Read calendars, event projections, invitations, categories, reminders, free/busy snapshots, offline state, and sanitized activity projections.", "required": true, "risk": "high" },
-    { "capability": "calendar:write", "label": "Change calendars", "description": "Create, update, copy, move, and delete events, calendars, categories, preferences, and reminder projections through host effects.", "required": false, "risk": "high" },
+    { "capability": "calendar:write", "label": "Change calendars", "description": "Create, update, copy, move, and delete events, calendars, categories, preferences, and reminder projections through host effects.", "required": true, "risk": "high" },
     { "capability": "calendar:invite", "label": "Send calendar invitations", "description": "Plan invitations, updates, cancellations, conference link creation, and attendee notifications through host services.", "required": false, "risk": "critical" },
     { "capability": "calendar:respond", "label": "Respond to invitations", "description": "Accept, tentatively accept, decline, or propose a new time through host RSVP services.", "required": false, "risk": "high" },
     { "capability": "calendar:share", "label": "Share calendars", "description": "Grant, revoke, accept, or subscribe to calendar access through host-managed sharing and subscription services.", "required": false, "risk": "high" },

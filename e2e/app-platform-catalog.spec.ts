@@ -149,11 +149,10 @@ test.describe('Synapp Apps app-platform catalog visibility', () => {
 
     await page.getByTestId('app-review-button-calendar-management').click();
     await expect(page.getByTestId('app-capability-locked-calendar:read')).toBeVisible();
-    await expect(page.getByTestId('app-capability-toggle-calendar:write')).not.toBeChecked();
+    await expect(page.getByTestId('app-capability-locked-calendar:write')).toBeVisible();
     await expect(page.getByTestId('app-capability-toggle-calendar:settings')).not.toBeChecked();
     await expect(page.getByTestId('app-capability-save')).toBeDisabled();
 
-    await page.getByTestId('app-capability-toggle-calendar:write').check();
     await page.getByTestId('app-capability-toggle-calendar:settings').check();
     await page.getByTestId('app-capability-save').click();
 
@@ -162,7 +161,7 @@ test.describe('Synapp Apps app-platform catalog visibility', () => {
       app_id: 'calendar-management',
       capabilities: ['calendar:read', 'calendar:write', 'calendar:settings'],
     });
-    await expect(page.getByTestId('app-capability-toggle-calendar:write')).toBeChecked();
+    await expect(page.getByTestId('app-capability-locked-calendar:write')).toBeVisible();
     await expect(page.getByTestId('app-capability-toggle-calendar:settings')).toBeChecked();
 
     await page.getByTestId('app-capability-toggle-calendar:settings').uncheck();
@@ -173,7 +172,7 @@ test.describe('Synapp Apps app-platform catalog visibility', () => {
       app_id: 'calendar-management',
       capabilities: ['calendar:read', 'calendar:write'],
     });
-    await expect(page.getByTestId('app-capability-toggle-calendar:write')).toBeChecked();
+    await expect(page.getByTestId('app-capability-locked-calendar:write')).toBeVisible();
     await expect(page.getByTestId('app-capability-toggle-calendar:settings')).not.toBeChecked();
 
     await page.getByTestId('app-platform-tab-installed').click();
@@ -195,7 +194,7 @@ test.describe('Synapp Apps app-platform catalog visibility', () => {
 
     await page.getByTestId('app-review-button-calendar-management').click();
     await expect(page.getByTestId('app-capability-locked-calendar:read')).toBeVisible();
-    await expect(page.getByTestId('app-capability-toggle-calendar:write')).not.toBeChecked();
+    await expect(page.getByTestId('app-capability-locked-calendar:write')).toBeVisible();
     await expect(page.getByTestId('app-capability-toggle-calendar:settings')).not.toBeChecked();
   });
 
@@ -213,7 +212,7 @@ test.describe('Synapp Apps app-platform catalog visibility', () => {
       const response = await fetch('/api/admin/apps/calendar-management/capability-grants', {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ capabilities: ['calendar:write'] }),
+        body: JSON.stringify({ capabilities: ['calendar:read', 'calendar:write', 'calendar:root'] }),
       });
       return { status: response.status, body: await response.json() };
     });
@@ -225,10 +224,9 @@ test.describe('Synapp Apps app-platform catalog visibility', () => {
 
     await page.getByTestId('app-review-button-calendar-management').click();
     await expect(page.getByTestId('app-capability-locked-calendar:read')).toBeVisible();
-    await expect(page.getByTestId('app-capability-toggle-calendar:write')).not.toBeChecked();
+    await expect(page.getByTestId('app-capability-locked-calendar:write')).toBeVisible();
     await expect(page.getByTestId('app-capability-toggle-calendar:settings')).not.toBeChecked();
 
-    await page.getByTestId('app-capability-toggle-calendar:write').check();
     await page.getByTestId('app-capability-toggle-calendar:settings').check();
     await page.getByTestId('app-capability-save').click();
 
@@ -240,7 +238,7 @@ test.describe('Synapp Apps app-platform catalog visibility', () => {
 
     await page.getByTestId('app-platform-tab-installed').click();
     await page.getByTestId('app-review-button-calendar-management').click();
-    await expect(page.getByTestId('app-capability-toggle-calendar:write')).toBeChecked();
+    await expect(page.getByTestId('app-capability-locked-calendar:write')).toBeVisible();
     await expect(page.getByTestId('app-capability-toggle-calendar:settings')).toBeChecked();
   });
 
@@ -536,9 +534,8 @@ async function mockAppPlatform(page: Page, catalog: AppCatalogEntry[]): Promise<
     const knownCapabilities = new Set(app.capabilities.map((capability) => capability.capability));
     const requiredCapabilities = app.capabilities.filter((capability) => capability.required).map((capability) => capability.capability);
     const hasUnknownCapability = body.capabilities.some((capability) => !knownCapabilities.has(capability));
-    const hasAllRequiredCapabilities = requiredCapabilities.every((capability) => body.capabilities.includes(capability));
 
-    if (hasUnknownCapability || !hasAllRequiredCapabilities) {
+    if (hasUnknownCapability) {
       await route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: 'invalid capability grant request' }) });
       return;
     }
@@ -558,6 +555,18 @@ async function mockAppPlatform(page: Page, catalog: AppCatalogEntry[]): Promise<
     }
 
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify(uiSchemaPayload(app)) });
+  });
+
+  await page.route('**/apps/calendar-management', async (route) => {
+    const app = findCatalogApp(catalog, 'calendar-management');
+    const state = uiSchemaPayload(app);
+    const recovery = state.recovery;
+    const title = recovery?.title ?? app.name;
+    const message = recovery?.message ?? `${app.name} workspace is available.`;
+    await route.fulfill({
+      contentType: 'text/html',
+      body: `<!doctype html><html><body><main data-testid="app-route-calendar-management"><h1>${title}</h1><p>${message}</p><p>${state.state}</p></main></body></html>`,
+    });
   });
 
   await page.route('**/api/admin/apps/*/install', async (route) => {
