@@ -9,7 +9,7 @@
   "category": "productivity",
   "repository_url": "https://github.com/nightsky78/Synapp_Apps/",
   "package_url": "https://github.com/nightsky78/Synapp_Apps/releases/download/mail-client-v2.1.1/mail-client-2.1.1.tar.gz",
-  "package_sha256": "1971fa47e3aa1cf461559d2a0dd1d6b0369b2b50ca54795e1a9056005b3f364f",
+  "package_sha256": "f76185b61f8c852283e41af3dc753b90376c8d3c6da5e0d1ea8e917049bfb3c1",
   "manifest_sha256": "a889835d3e037096401c8ef78df24c4914ae05f6deb7bd02190644516231581e",
   "signature": {
     "type": "metadata-only",
@@ -20,7 +20,7 @@
   "source": {
     "repository": "https://github.com/nightsky78/Synapp_Apps/",
     "directory": "apps/first-party/mail-client",
-    "commit": "420ad2b67f35e3b026c2e46a46d0c9bb1d165570"
+    "commit": "0e32240431c93d70b6abb7cc3de6854e42748a8e"
   },
   "manifest": {
     "$schema": "../../../catalog/schemas/package-manifest.schema.json",
