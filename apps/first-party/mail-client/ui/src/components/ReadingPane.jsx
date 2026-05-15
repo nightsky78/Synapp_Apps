@@ -1,7 +1,6 @@
 import React, { useCallback } from 'react';
 import { useApp } from '../context/AppContext.jsx';
 import { Spinner } from './Spinner.jsx';
-import { invoke } from '../bridge.js';
 
 function formatFullDate(unix) {
   if (!unix) return '';
@@ -46,7 +45,7 @@ function htmlToText(html) {
 }
 
 export default function ReadingPane() {
-  const { state, archiveEmail, deleteEmail, openCompose, toast, can } = useApp();
+  const { state, archiveEmail, deleteEmail, openCompose, flagEmail, can } = useApp();
   const email = state.activeEmail;
 
   const handleReply = useCallback(() => {
@@ -76,13 +75,8 @@ export default function ReadingPane() {
 
   const handleToggleFlag = useCallback(async () => {
     if (!email) return;
-    try {
-      await invoke('flag_email', { email_ids: [email.email_id], flagged: !email.is_flagged });
-      toast(email.is_flagged ? 'Flag removed' : 'Flagged', 'success');
-    } catch (err) {
-      toast(`Flag failed: ${err.message}`, 'error');
-    }
-  }, [email, toast]);
+    flagEmail(email.email_id);
+  }, [email, flagEmail]);
 
   if (state.loadingEmail) {
     return (
@@ -136,6 +130,12 @@ export default function ReadingPane() {
             <div className="reading-pane__meta-row">
               <span className="reading-pane__meta-label">CC</span>
               <span className="reading-pane__meta-value"><AddressList addresses={email.cc} /></span>
+            </div>
+          )}
+
+          {email.remote_sync_state === 'pending_remote_move' && (
+            <div className="reading-pane__sync" data-testid={`email-sync-state-${email.email_id}`}>
+              Organized locally; remote mailbox sync pending.
             </div>
           )}
         </div>

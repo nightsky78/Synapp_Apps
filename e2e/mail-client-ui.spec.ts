@@ -44,8 +44,43 @@ test.describe('Mail Client packaged UI', () => {
 
   test('TC-SA-MAIL-UI-006: no host bridge renders real mail API account and message responses', async ({ page }) => {
     const apiCalls: string[] = [];
+    const platformCalls: string[] = [];
+    const platformDocs = new Map<string, Map<string, unknown>>();
     const mailboxReads: string[] = [];
     const sentSubjects: string[] = ['Real sent IMAP message'];
+
+    await page.addInitScript(() => {
+      (window as any).__SYNAPP_ACCESS_TOKEN__ = 'mail-ui-platform-token';
+    });
+
+    function docsFor(collection: string) {
+      if (!platformDocs.has(collection)) platformDocs.set(collection, new Map());
+      return platformDocs.get(collection)!;
+    }
+
+    await page.route('**/api/v1/platform/mail-client/documents/**', async (route) => {
+      const request = route.request();
+      const requestUrl = new URL(request.url());
+      const segments = requestUrl.pathname.split('/');
+      const collection = segments[segments.indexOf('documents') + 1];
+      platformCalls.push(`${request.method()} ${requestUrl.pathname} ${request.headers().authorization || ''}`);
+      if (request.method() === 'GET') {
+        const filters = JSON.parse(requestUrl.searchParams.get('filter') || '{}') as Record<string, string>;
+        const documents = [...docsFor(collection).entries()]
+          .map(([doc_id, data]) => ({ doc_id, data: data as Record<string, unknown> }))
+          .filter((doc) => Object.entries(filters).every(([key, value]) => String(doc.data[key]) === String(value)));
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ documents }) });
+        return;
+      }
+      if (request.method() === 'POST') {
+        const body = request.postDataJSON() as { doc_id?: string; data?: unknown };
+        docsFor(collection).set(body.doc_id || `doc-${Date.now()}`, body.data || {});
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ doc_id: body.doc_id }) });
+        return;
+      }
+      await route.fulfill({ status: 405, body: 'method not allowed' });
+    });
+
     await page.route('**/api/v1/mail/accounts', async (route) => {
       apiCalls.push(route.request().method() + ' ' + new URL(route.request().url()).pathname);
       await route.fulfill({
@@ -95,30 +130,21 @@ test.describe('Mail Client packaged UI', () => {
       const mailbox = (requestUrl.searchParams.get('mailbox') || 'INBOX').toUpperCase();
       mailboxReads.push(mailbox);
       apiCalls.push(route.request().method() + ' ' + requestUrl.pathname);
-      const sentMessages = sentSubjects.map((subject, index) => ({
-        id: `real-sent-message-${index + 1}`,
-        uid: String(99 + index),
-        message_id: `<real-sent-message-${index + 1}@example.com>`,
-        account_id: 'real-account-1',
-        mailbox: 'SENT',
-        from: { name: 'Real User', email: 'real@example.com' },
-        to: [{ name: 'Recipient', email: 'recipient@example.com' }],
-        subject,
-        snippet: `This message appears in Sent: ${subject}`,
-        body_text: `This message appears in Sent: ${subject}`,
-        body_html: `<p>This message appears in Sent: ${subject}</p>`,
-        date_iso: '2026-05-14T09:30:00Z',
-        has_attachments: false,
-      }));
+      if (mailbox === 'SENT') {
+        await route.fulfill({
+          status: 502,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: 'imap fetch close: imap BAD Error in IMAP command FETCH: Invalid messageset' }),
+        });
+        return;
+      }
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
           account: { account_id: 'real-account-1', account_label: 'Real mailbox', email_address: 'real@example.com', status: 'active' },
           mailbox,
-          messages: mailbox === 'SENT'
-            ? sentMessages
-            : [{
+          messages: [{
                 id: 'real-message-1',
                 uid: '42',
                 message_id: '<real-message-1@example.com>',
@@ -131,6 +157,7 @@ test.describe('Mail Client packaged UI', () => {
                 body_text: 'This message came from the platform mail API.',
                 body_html: '<p>This message came from the platform mail API.</p>',
                 date_iso: '2026-05-14T08:30:00Z',
+                is_read: false,
                 has_attachments: false,
               }],
         }),
@@ -144,10 +171,17 @@ test.describe('Mail Client packaged UI', () => {
     await page.getByRole('button', { name: /Email from Real Sender: Real IMAP message/ }).click();
     await expect(page.getByRole('heading', { name: 'Real IMAP message' })).toBeVisible();
     await expect(page.getByLabel('Email content').getByText('This message came from the platform mail API.')).toBeVisible();
+    await page.getByTestId('email-flag-button-real-message-1').click();
+    await expect.poll(() => docsFor('messages').get('real-account-1:real-message-1') as { is_read?: boolean; is_flagged?: boolean }).toMatchObject({ is_read: true, is_flagged: true });
+
+    for (const mailboxId of ['inbox', 'drafts', 'sent', 'archive', 'junk', 'trash']) {
+      await expect(page.getByTestId(`mailbox-button-${mailboxId}`)).toBeVisible();
+    }
 
     await page.getByTestId('mailbox-button-sent').click();
     await expect(page.getByTestId('mailbox-button-sent')).toHaveClass(/sidebar__folder--active/);
-    await expect(page.getByRole('button', { name: /Email from Real User: Real sent IMAP message/ })).toBeVisible();
+    await expect(page.getByTestId('sync-warning-sent')).toContainText('Sent sync is delayed. Showing saved messages.');
+    await expect(page.getByText('No messages', { exact: true })).toBeVisible();
 
     await page.getByRole('button', { name: 'Compose new email' }).click();
     const compose = page.getByRole('dialog', { name: 'Compose email' });
@@ -162,11 +196,19 @@ test.describe('Mail Client packaged UI', () => {
     await expect(page.getByTestId('mailbox-button-inbox')).toHaveClass(/sidebar__folder--active/);
     await page.getByTestId('mailbox-button-sent').click();
     await expect(page.getByTestId('mailbox-button-sent')).toHaveClass(/sidebar__folder--active/);
+    await expect(page.getByTestId('sync-warning-sent')).toContainText('Sent sync is delayed. Showing saved messages.');
     await expect(page.getByRole('button', { name: /Email from Real User: Real sent from no-host flow/ })).toBeVisible();
 
     expect(apiCalls).toContain('GET /api/v1/mail/accounts');
     expect(apiCalls).toContain('GET /api/v1/mail/messages');
     expect(apiCalls).toContain('POST /api/v1/mail/send');
+    expect(platformCalls).toEqual(expect.arrayContaining([
+      expect.stringMatching(/^GET \/api\/v1\/platform\/mail-client\/documents\/messages Bearer mail-ui-platform-token$/),
+      expect.stringMatching(/^POST \/api\/v1\/platform\/mail-client\/documents\/messages Bearer mail-ui-platform-token$/),
+      expect.stringMatching(/^POST \/api\/v1\/platform\/mail-client\/documents\/mailboxes Bearer mail-ui-platform-token$/),
+    ]));
+    expect(docsFor('messages').has('real-account-1:real-message-1')).toBe(true);
+    expect([...docsFor('messages').keys()].some((key) => key.startsWith('real-account-1:real-sent-'))).toBe(true);
     expect(mailboxReads).toContain('SENT');
     await expect(page.getByText('Alice Chen')).toHaveCount(0);
   });
@@ -196,6 +238,47 @@ test.describe('Mail Client packaged UI', () => {
     await page.getByRole('toolbar', { name: 'Bulk message actions' }).getByRole('button', { name: 'Archive' }).click();
     await expect(page.getByText('Archived selected messages')).toBeVisible();
     await expect(mailCalls(page, 'archive_email')).resolves.toHaveLength(1);
+  });
+
+  test('TC-SA-MAIL-UI-007: selected messages move between folders and remain visible in the destination', async ({ page }) => {
+    await openMailUi(page, { permission: 'admin' });
+
+    await page.getByRole('button', { name: /Email from Alice Chen: Q2 Budget Review/ }).click();
+    await page.getByLabel('Select message Q2 Budget Review').check();
+    await page.getByTestId('bulk-move-button').click();
+    await expect(page.getByTestId('bulk-move-menu')).toBeVisible();
+    await page.getByTestId('bulk-move-option-projects').click();
+
+    await expect(page.getByText('Moved locally. Remote sync pending.')).toBeVisible();
+    await expect(page.getByRole('button', { name: /Email from Alice Chen: Q2 Budget Review/ })).toHaveCount(0);
+
+    await page.getByTestId('mailbox-button-projects').click();
+    const moved = page.getByRole('button', { name: /Email from Alice Chen: Q2 Budget Review/ });
+    await expect(moved).toBeVisible();
+    await expect(page.getByTestId('email-sync-state-email-1')).toContainText('Sync pending');
+    await moved.click();
+    await expect(page.getByLabel('Email content').getByTestId('email-sync-state-email-1')).toContainText('remote mailbox sync pending');
+    await expect(mailCalls(page, 'move_email')).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({ payload: expect.objectContaining({ email_ids: ['email-1'], destination_mailbox_id: 'projects' }) }),
+    ]));
+  });
+
+  test('TC-SA-MAIL-UI-008: filtered bulk move only selects visible messages', async ({ page }) => {
+    await openMailUi(page, { permission: 'admin' });
+
+    await page.getByLabel('Message filters').getByRole('button', { name: 'Unread' }).click();
+    await page.getByLabel('Select all visible messages').check();
+    await page.getByTestId('bulk-move-button').click();
+    await page.getByTestId('bulk-move-option-projects').click();
+
+    await expect(mailCalls(page, 'move_email')).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({ payload: expect.objectContaining({ email_ids: ['email-1', 'email-4'], destination_mailbox_id: 'projects' }) }),
+    ]));
+
+    await page.getByLabel('Message filters').getByRole('button', { name: 'All' }).click();
+    await expect(page.getByRole('button', { name: /Email from Bob Smith: Sprint planning notes/ })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Email from GitHub: \[GitHub\] Pull request review requested/ })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Email from Alice Chen: Q2 Budget Review/ })).toHaveCount(0);
   });
 
   test('TC-SA-MAIL-UI-002: compose validates recipients, saves drafts, sends, and schedules mail', async ({ page }) => {
@@ -451,6 +534,14 @@ async function openMailUi(page: Page, options: HostBridgeOptions = {}) {
           case 'flag_email':
             emails.forEach((email) => { if (payload.email_ids?.includes(email.email_id)) email.is_flagged = payload.flagged; });
             return ok(operation, { mutation: 'flag_email', resource_ids: payload.email_ids ?? [], applied: true });
+          case 'move_email':
+            emails.forEach((email) => {
+              if (payload.email_ids?.includes(email.email_id)) {
+                email.mailbox_id = payload.destination_mailbox_id;
+                email.remote_sync_state = 'pending_remote_move';
+              }
+            });
+            return ok(operation, { mutation: 'move_email', resource_ids: payload.email_ids ?? [], destination_mailbox_id: payload.destination_mailbox_id, applied: true, sync_state: 'pending_remote_move' });
           case 'archive_email':
             return ok(operation, { mutation: 'archive_email', resource_ids: payload.email_ids ?? [], applied: true });
           case 'delete_email':

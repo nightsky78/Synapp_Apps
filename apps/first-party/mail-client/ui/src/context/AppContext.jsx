@@ -15,6 +15,7 @@ const initialState = {
   emails: [],
   emailsTotal: 0,
   emailsUnread: 0,
+  mailboxSyncWarnings: {},
   emailPage: 0,
   searchQuery: '',
   searchResults: null,
@@ -44,6 +45,11 @@ function reducer(state, action) {
     case 'SET_ACTIVE_ACCOUNT': return { ...state, activeAccountId: action.payload, activeMailboxId: 'inbox', activeEmailId: null, activeEmail: null, emails: [], selectedEmailIds: [], searchQuery: '', searchResults: null, activeRoute: 'inbox' };
     case 'SET_ACTIVE_MAILBOX': return { ...state, activeMailboxId: action.payload, activeEmailId: null, activeEmail: null, emails: [], selectedEmailIds: [], searchQuery: '', searchResults: null, activeRoute: 'inbox' };
     case 'SET_EMAILS': return { ...state, emails: action.payload.messages, emailsTotal: action.payload.total_count, emailsUnread: action.payload.unread_count, loadingEmails: false };
+    case 'SET_MAILBOX_SYNC_WARNING': return { ...state, mailboxSyncWarnings: { ...state.mailboxSyncWarnings, [action.payload.mailbox_id]: action.payload } };
+    case 'CLEAR_MAILBOX_SYNC_WARNING': {
+      const { [action.payload]: _removed, ...mailboxSyncWarnings } = state.mailboxSyncWarnings;
+      return { ...state, mailboxSyncWarnings };
+    }
     case 'SET_LOADING_EMAILS': return { ...state, loadingEmails: action.payload };
     case 'SET_ACTIVE_EMAIL': return { ...state, activeEmailId: action.payload?.email_id ?? null, activeEmail: action.payload };
     case 'SET_LOADING_EMAIL': return { ...state, loadingEmail: action.payload };
@@ -60,7 +66,7 @@ function reducer(state, action) {
         : [...state.selectedEmailIds, action.payload];
       return { ...state, selectedEmailIds: selected };
     }
-    case 'SELECT_ALL_VISIBLE': return { ...state, selectedEmailIds: action.payload ? state.emails.map(email => email.email_id) : [] };
+    case 'SELECT_VISIBLE_EMAILS': return { ...state, selectedEmailIds: action.payload };
     case 'CLEAR_SELECTION': return { ...state, selectedEmailIds: [] };
     case 'SET_COMPOSE': return { ...state, composeOpen: action.payload.open, composeDraftId: action.payload.draftId ?? null };
     case 'SET_SHOW_FOLDER_MANAGER': return { ...state, showFolderManager: action.payload };
@@ -82,6 +88,15 @@ function reducer(state, action) {
       const activeEmail = state.activeEmail?.email_id === action.payload ? null : state.activeEmail;
       const activeEmailId = activeEmail?.email_id ?? null;
       return { ...state, emails, activeEmail, activeEmailId };
+    }
+    case 'MOVE_EMAILS_LOCAL': {
+      const moving = new Set(action.payload.emailIds);
+      const emails = state.emails.filter(e => !moving.has(e.email_id));
+      const activeEmail = state.activeEmail && moving.has(state.activeEmail.email_id)
+        ? { ...state.activeEmail, mailbox_id: action.payload.destinationMailboxId, remote_sync_state: action.payload.syncState }
+        : state.activeEmail;
+      const activeEmailId = activeEmail && activeEmail.mailbox_id === state.activeMailboxId ? activeEmail.email_id : null;
+      return { ...state, emails, activeEmail: activeEmailId ? activeEmail : null, activeEmailId, selectedEmailIds: [] };
     }
     default: return state;
   }
@@ -137,6 +152,8 @@ export function AppProvider({ children }) {
         pagination: { offset: page * 50, limit: 50 },
       });
       dispatch({ type: 'SET_EMAILS', payload: res.data.snapshot });
+      if (res.data.sync_warning) dispatch({ type: 'SET_MAILBOX_SYNC_WARNING', payload: res.data.sync_warning });
+      else dispatch({ type: 'CLEAR_MAILBOX_SYNC_WARNING', payload: mailboxId });
       dispatch({ type: 'SET_EMAIL_PAGE', payload: page });
     } catch (err) {
       dispatch({ type: 'SET_LOADING_EMAILS', payload: false });
@@ -159,40 +176,57 @@ export function AppProvider({ children }) {
     dispatch({ type: 'TOGGLE_FLAG_LOCAL', payload: emailId });
     try {
       await invoke('flag_email', { email_ids: [emailId], flagged: !email?.is_flagged, account_id: email?.account_id || state.activeAccountId });
+      toast(email?.is_flagged ? 'Flag removed' : 'Flagged', 'success');
     } catch (err) {
       dispatch({ type: 'TOGGLE_FLAG_LOCAL', payload: emailId }); // revert
       toast(`Flag failed: ${err.message}`, 'error');
     }
   }, [state.emails, state.activeEmail, state.activeAccountId, toast]);
 
+  const moveEmail = useCallback(async (emailIds, destinationMailboxId) => {
+    if (!emailIds.length) return;
+    const destination = state.mailboxes.find(item => item.mailbox_id === destinationMailboxId);
+    try {
+      const res = await invoke('move_email', { email_ids: emailIds, account_id: state.activeAccountId, source_mailbox_id: state.activeMailboxId, destination_mailbox_id: destinationMailboxId });
+      dispatch({ type: 'MOVE_EMAILS_LOCAL', payload: { emailIds, destinationMailboxId, syncState: res.data.sync_state || 'pending_remote_move' } });
+      loadMailboxes(state.activeAccountId);
+      toast(res.data.sync_state === 'pending_remote_move' ? 'Moved locally. Remote sync pending.' : `Moved to ${destination?.name || 'folder'}`, 'success');
+    } catch (err) {
+      toast(`Move failed: ${err.message}`, 'error');
+      loadEmails(state.activeMailboxId, state.emailPage);
+    }
+  }, [state.mailboxes, state.activeAccountId, state.activeMailboxId, state.emailPage, toast, loadMailboxes, loadEmails]);
+
   const archiveEmail = useCallback(async (emailId) => {
     const toastId = toast('Archiving…', 'undo', {
       persistent: true,
       undoAction: () => { removeToast(toastId); },
     });
-    dispatch({ type: 'REMOVE_EMAIL_LOCAL', payload: emailId });
     try {
-      await invoke('archive_email', { email_ids: [emailId], account_id: state.activeAccountId });
+      await invoke('archive_email', { email_ids: [emailId], account_id: state.activeAccountId, source_mailbox_id: state.activeMailboxId });
+      dispatch({ type: 'REMOVE_EMAIL_LOCAL', payload: emailId });
+      loadMailboxes(state.activeAccountId);
       removeToast(toastId);
-      toast('Archived', 'success');
+      toast('Archived locally. Remote sync pending.', 'success');
     } catch (err) {
       removeToast(toastId);
       toast(`Archive failed: ${err.message}`, 'error');
       // Reload to recover
       loadEmails(state.activeMailboxId, state.emailPage);
     }
-  }, [toast, removeToast, loadEmails, state.activeAccountId, state.activeMailboxId, state.emailPage]);
+  }, [toast, removeToast, loadEmails, loadMailboxes, state.activeAccountId, state.activeMailboxId, state.emailPage]);
 
   const deleteEmail = useCallback(async (emailId) => {
-    dispatch({ type: 'REMOVE_EMAIL_LOCAL', payload: emailId });
     try {
-      await invoke('delete_email', { email_ids: [emailId], account_id: state.activeAccountId, permanent: false });
-      toast('Moved to Trash', 'success');
+      await invoke('delete_email', { email_ids: [emailId], account_id: state.activeAccountId, source_mailbox_id: state.activeMailboxId, permanent: false });
+      dispatch({ type: 'REMOVE_EMAIL_LOCAL', payload: emailId });
+      loadMailboxes(state.activeAccountId);
+      toast('Moved to Trash locally. Remote sync pending.', 'success');
     } catch (err) {
       toast(`Delete failed: ${err.message}`, 'error');
       loadEmails(state.activeMailboxId, state.emailPage);
     }
-  }, [toast, loadEmails, state.activeAccountId, state.activeMailboxId, state.emailPage]);
+  }, [toast, loadEmails, loadMailboxes, state.activeAccountId, state.activeMailboxId, state.emailPage]);
 
   const bulkMarkRead = useCallback(async (read) => {
     if (state.selectedEmailIds.length === 0) return;
@@ -213,12 +247,13 @@ export function AppProvider({ children }) {
     dispatch({ type: 'CLEAR_SELECTION' });
     try {
       await invoke('archive_email', { email_ids: emailIds, account_id: state.activeAccountId });
-      toast('Archived selected messages', 'success');
+      toast('Archived selected messages locally. Remote sync pending.', 'success');
+      loadMailboxes(state.activeAccountId);
       loadEmails(state.activeMailboxId, state.emailPage);
     } catch (err) {
       toast(`Archive failed: ${err.message}`, 'error');
     }
-  }, [state.selectedEmailIds, state.activeAccountId, state.activeMailboxId, state.emailPage, toast, loadEmails]);
+  }, [state.selectedEmailIds, state.activeAccountId, state.activeMailboxId, state.emailPage, toast, loadEmails, loadMailboxes]);
 
   const bulkDelete = useCallback(async () => {
     if (state.selectedEmailIds.length === 0) return;
@@ -226,12 +261,13 @@ export function AppProvider({ children }) {
     dispatch({ type: 'CLEAR_SELECTION' });
     try {
       await invoke('delete_email', { email_ids: emailIds, account_id: state.activeAccountId, permanent: false });
-      toast('Moved selected messages to Trash', 'success');
+      toast('Moved selected messages to Trash locally. Remote sync pending.', 'success');
+      loadMailboxes(state.activeAccountId);
       loadEmails(state.activeMailboxId, state.emailPage);
     } catch (err) {
       toast(`Delete failed: ${err.message}`, 'error');
     }
-  }, [state.selectedEmailIds, state.activeAccountId, state.activeMailboxId, state.emailPage, toast, loadEmails]);
+  }, [state.selectedEmailIds, state.activeAccountId, state.activeMailboxId, state.emailPage, toast, loadEmails, loadMailboxes]);
 
   const search = useCallback((query) => {
     dispatch({ type: 'SET_SEARCH_QUERY', payload: query });
@@ -264,7 +300,7 @@ export function AppProvider({ children }) {
     state, dispatch,
     can, toast, removeToast,
     loadAccounts, loadMailboxes, loadEmails,
-    selectEmail, flagEmail, archiveEmail, deleteEmail,
+    selectEmail, flagEmail, moveEmail, archiveEmail, deleteEmail,
     bulkMarkRead, bulkArchive, bulkDelete,
     search, openCompose, closeCompose,
   };

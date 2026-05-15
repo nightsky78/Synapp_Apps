@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useApp } from '../context/AppContext.jsx';
 import { CenteredSpinner } from './Spinner.jsx';
 
@@ -53,6 +53,9 @@ function EmailItem({ email, active, selected, onSelect, onFlag, onToggleSelected
       <div className="email-item__row3">
         <span className="email-item__preview">{email.preview}</span>
       </div>
+      {email.remote_sync_state === 'pending_remote_move' && (
+        <div className="email-item__sync" data-testid={`email-sync-state-${email.email_id}`}>Sync pending</div>
+      )}
       <button
         className={`email-item__flag-btn${email.is_flagged ? ' email-item__flag-btn--active' : ''}`}
         data-testid={`email-flag-button-${email.email_id}`}
@@ -67,9 +70,12 @@ function EmailItem({ email, active, selected, onSelect, onFlag, onToggleSelected
 }
 
 export default function EmailList() {
-  const { state, dispatch, loadEmails, selectEmail, flagEmail, bulkArchive, bulkDelete, bulkMarkRead, can } = useApp();
+  const { state, dispatch, loadEmails, selectEmail, flagEmail, moveEmail, bulkArchive, bulkDelete, bulkMarkRead, can } = useApp();
+  const [moveOpen, setMoveOpen] = useState(false);
+  const moveRef = useRef(null);
 
   const mailbox = state.mailboxes.find(m => m.mailbox_id === state.activeMailboxId);
+  const syncWarning = state.mailboxSyncWarnings[state.activeMailboxId];
   const visibleEmails = state.emails.filter(email => {
     if (state.activeFilter === 'unread') return !email.is_read;
     if (state.activeFilter === 'flagged') return email.is_flagged;
@@ -78,9 +84,30 @@ export default function EmailList() {
   });
   const totalPages = Math.ceil(state.emailsTotal / PAGE_SIZE);
   const allVisibleSelected = visibleEmails.length > 0 && visibleEmails.every(email => state.selectedEmailIds.includes(email.email_id));
+  const moveDestinations = state.mailboxes.filter(item => item.mailbox_id !== state.activeMailboxId);
 
   const handleSelect = useCallback((email) => selectEmail(email), [selectEmail]);
   const handleFlag = useCallback((id) => flagEmail(id), [flagEmail]);
+  const handleMove = useCallback((mailboxId) => {
+    setMoveOpen(false);
+    moveEmail(state.selectedEmailIds, mailboxId);
+  }, [moveEmail, state.selectedEmailIds]);
+
+  useEffect(() => {
+    if (!moveOpen) return undefined;
+    function handleDocumentClick(event) {
+      if (!moveRef.current?.contains(event.target)) setMoveOpen(false);
+    }
+    function handleKeyDown(event) {
+      if (event.key === 'Escape') setMoveOpen(false);
+    }
+    document.addEventListener('mousedown', handleDocumentClick);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleDocumentClick);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [moveOpen]);
 
   return (
     <section className="list-panel" aria-label="Email list">
@@ -92,14 +119,48 @@ export default function EmailList() {
         </div>
       </div>
 
+      {syncWarning && (
+        <div className="sync-warning" role="status" data-testid={`sync-warning-${state.activeMailboxId}`}>
+          {syncWarning.message || `${mailbox?.name || 'Folder'} sync is delayed. Showing saved messages.`}
+        </div>
+      )}
+
       <div className="bulk-toolbar" role="toolbar" aria-label="Bulk message actions">
         <label className="bulk-toolbar__select">
-          <input type="checkbox" checked={allVisibleSelected} onChange={event => dispatch({ type: 'SELECT_ALL_VISIBLE', payload: event.target.checked })} aria-label="Select all visible messages" />
+          <input type="checkbox" checked={allVisibleSelected} onChange={event => dispatch({ type: 'SELECT_VISIBLE_EMAILS', payload: event.target.checked ? visibleEmails.map(email => email.email_id) : [] })} aria-label="Select all visible messages" />
           <span>{state.selectedEmailIds.length ? `${state.selectedEmailIds.length} selected` : 'Select'}</span>
         </label>
         <button onClick={() => bulkMarkRead(true)} disabled={!state.selectedEmailIds.length}>Read</button>
         <button onClick={() => bulkMarkRead(false)} disabled={!state.selectedEmailIds.length}>Unread</button>
         <button onClick={bulkArchive} disabled={!state.selectedEmailIds.length || !can('organize')}>Archive</button>
+        <span className="bulk-move" ref={moveRef}>
+          <button
+            data-testid="bulk-move-button"
+            onClick={() => setMoveOpen(open => !open)}
+            disabled={!state.selectedEmailIds.length || !can('organize') || moveDestinations.length === 0}
+            aria-haspopup="menu"
+            aria-expanded={moveOpen}
+            aria-label="Move selected messages"
+          >
+            Move
+          </button>
+          {moveOpen && (
+            <span className="bulk-move__menu" data-testid="bulk-move-menu" role="menu">
+              {moveDestinations.map(destination => (
+                <button
+                  key={destination.mailbox_id}
+                  type="button"
+                  role="menuitem"
+                  data-testid={`bulk-move-option-${destination.mailbox_id}`}
+                  onClick={() => handleMove(destination.mailbox_id)}
+                  aria-label={`Move selected messages to ${destination.name}`}
+                >
+                  {destination.name}
+                </button>
+              ))}
+            </span>
+          )}
+        </span>
         <button onClick={bulkDelete} disabled={!state.selectedEmailIds.length || !can('organize')}>Delete</button>
         <button onClick={() => dispatch({ type: 'SET_SETTINGS_SECTION', payload: 'rules' })} disabled={!state.selectedEmailIds.length || !can('organize')}>Rule</button>
       </div>

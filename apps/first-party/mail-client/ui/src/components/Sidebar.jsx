@@ -14,7 +14,7 @@ export default function Sidebar() {
   const grouped = {
     favorites: state.mailboxes.filter(m => m.favorite),
     system: state.mailboxes.filter(m => !m.favorite && m.kind !== 'custom'),
-    custom: state.mailboxes.filter(m => m.kind === 'custom'),
+    custom: state.mailboxes.filter(m => !m.favorite && m.kind === 'custom'),
   };
 
   function FolderButton({ mailbox }) {

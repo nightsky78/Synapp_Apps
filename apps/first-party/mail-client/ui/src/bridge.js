@@ -229,6 +229,17 @@ const REST_CONTEXT = {
 
 let lastMailboxSnapshot = { messages: [], total_count: 0, unread_count: 0 };
 const draftStore = new Map();
+let volatileMailStore = null;
+const MAIL_STORE_VERSION = 1;
+const APP_ID = 'mail-client';
+const DEFAULT_REST_MAILBOXES = [
+  { mailbox_id: 'inbox', name: 'Inbox', kind: 'inbox', favorite: true },
+  { mailbox_id: 'drafts', name: 'Drafts', kind: 'drafts', favorite: false },
+  { mailbox_id: 'sent', name: 'Sent', kind: 'sent', favorite: false },
+  { mailbox_id: 'archive', name: 'Archive', kind: 'archive', favorite: false },
+  { mailbox_id: 'junk', name: 'Junk', kind: 'junk', favorite: false },
+  { mailbox_id: 'trash', name: 'Trash', kind: 'trash', favorite: false },
+];
 
 function getAccessToken() {
   if (typeof window.__synappAccessToken === 'string') return window.__synappAccessToken;
@@ -263,8 +274,175 @@ function apiErrorMessage(status, body) {
   return body || `Mail API request failed with HTTP ${status}`;
 }
 
+function isRecoverableMailboxFetchError(error) {
+  const message = String(error?.message || error || '').toLowerCase();
+  return message.includes('invalid messageset') || (message.includes('bad fetch') && message.includes('fetch'));
+}
+
 function ok(operation, data) {
   return { operation, status: 'accepted', data, host_effects: [], warnings: [] };
+}
+
+function hashString(value) {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = ((hash << 5) - hash) + value.charCodeAt(index);
+    hash |= 0;
+  }
+  return Math.abs(hash).toString(36);
+}
+
+function mailStoreKey() {
+  const token = getAccessToken();
+  const identity = token ? `token-${hashString(token)}` : REST_CONTEXT.user_id;
+  return `synapp:mail-client:v${MAIL_STORE_VERSION}:${identity}`;
+}
+
+function emptyMailStore() {
+  return { version: MAIL_STORE_VERSION, mailboxes: {}, messages: {}, operations: [] };
+}
+
+function readMailStore() {
+  if (!getAccessToken()) return volatileMailStore ? JSON.parse(JSON.stringify(volatileMailStore)) : emptyMailStore();
+  try {
+    const raw = window.localStorage?.getItem(mailStoreKey());
+    if (!raw) return emptyMailStore();
+    const parsed = JSON.parse(raw);
+    return {
+      ...emptyMailStore(),
+      ...parsed,
+      mailboxes: parsed.mailboxes || {},
+      messages: parsed.messages || {},
+      operations: parsed.operations || [],
+    };
+  } catch (_) {
+    return emptyMailStore();
+  }
+}
+
+function writeMailStore(store) {
+  if (!getAccessToken()) {
+    volatileMailStore = JSON.parse(JSON.stringify(store));
+    return;
+  }
+  try {
+    window.localStorage?.setItem(mailStoreKey(), JSON.stringify(store));
+  } catch (_) {
+    // The REST fallback remains usable even when browser storage is unavailable.
+  }
+}
+
+function hasPlatformDocumentStore() {
+  return Boolean(getAccessToken());
+}
+
+async function queryPlatformDocuments(collection, filters = {}, limit = 1000) {
+  const params = new URLSearchParams({ filter: JSON.stringify(filters), limit: String(limit) });
+  const data = await apiJson(`/api/v1/platform/${APP_ID}/documents/${collection}?${params.toString()}`);
+  return (data.documents || []).map((doc) => ({ doc_id: doc.doc_id, data: doc.data || {} }));
+}
+
+async function putPlatformDocument(collection, docId, data) {
+  await apiJson(`/api/v1/platform/${APP_ID}/documents/${collection}`, {
+    method: 'POST',
+    body: JSON.stringify({ doc_id: docId, data }),
+  });
+}
+
+async function readPersistentMailStore(accountId) {
+  if (!hasPlatformDocumentStore()) return ensureDefaultMailboxes(readMailStore(), accountId);
+  try {
+    const [mailboxes, messages] = await Promise.all([
+      queryPlatformDocuments('mailboxes', { account_id: accountId }, 1000),
+      queryPlatformDocuments('messages', { account_id: accountId }, 1000),
+    ]);
+    const store = emptyMailStore();
+    for (const doc of mailboxes) {
+      const mailbox = doc.data;
+      if (mailbox.mailbox_id) store.mailboxes[`${mailbox.account_id || accountId}:${mailbox.mailbox_id}`] = { account_id: accountId, ...mailbox };
+    }
+    for (const doc of messages) {
+      const message = doc.data;
+      if (message.email_id) store.messages[`${message.account_id || accountId}:${message.email_id}`] = { account_id: accountId, ...message };
+    }
+    const merged = refreshMailboxCounts(ensureDefaultMailboxes(store, accountId), accountId);
+    writeMailStore(merged);
+    return merged;
+  } catch (error) {
+    if (hasPlatformDocumentStore()) throw error;
+    return ensureDefaultMailboxes(readMailStore(), accountId);
+  }
+}
+
+async function writePersistentMailStore(store, accountId) {
+  writeMailStore(store);
+  if (!hasPlatformDocumentStore()) return;
+  const writes = [];
+  for (const mailbox of Object.values(store.mailboxes)) {
+    if (mailbox.account_id === accountId) writes.push(putPlatformDocument('mailboxes', `${accountId}:${mailbox.mailbox_id}`, mailbox));
+  }
+  for (const message of Object.values(store.messages)) {
+    if (message.account_id === accountId) writes.push(putPlatformDocument('messages', `${accountId}:${message.email_id}`, message));
+  }
+  for (const operation of store.operations) {
+    if (operation.account_id === accountId) writes.push(putPlatformDocument('mail_operations', operation.operation_id || `${operation.account_id}:${operation.created_at}:${operation.destination_mailbox_id}`, operation));
+  }
+  await Promise.all(writes);
+}
+
+function ensureDefaultMailboxes(store, accountId) {
+  if (!accountId) return store;
+  for (const mailbox of DEFAULT_REST_MAILBOXES) {
+    const key = `${accountId}:${mailbox.mailbox_id}`;
+    store.mailboxes[key] = {
+      account_id: accountId,
+      unread_count: 0,
+      total_count: 0,
+      sync_state: 'ok',
+      ...mailbox,
+      ...store.mailboxes[key],
+    };
+  }
+  return store;
+}
+
+function messagesForMailbox(store, accountId, mailboxId) {
+  return Object.values(store.messages)
+    .filter((message) => message.account_id === accountId && message.mailbox_id === mailboxId)
+    .sort((a, b) => (b.received_at || b.sent_at || 0) - (a.received_at || a.sent_at || 0));
+}
+
+function refreshMailboxCounts(store, accountId) {
+  ensureDefaultMailboxes(store, accountId);
+  for (const key of Object.keys(store.mailboxes)) {
+    if (!key.startsWith(`${accountId}:`)) continue;
+    const mailboxId = store.mailboxes[key].mailbox_id;
+    const messages = messagesForMailbox(store, accountId, mailboxId);
+    store.mailboxes[key] = {
+      ...store.mailboxes[key],
+      total_count: messages.length,
+      unread_count: messages.filter((message) => !message.is_read).length,
+    };
+  }
+  return store;
+}
+
+function snapshotForMailbox(store, accountId, mailboxId) {
+  const messages = messagesForMailbox(store, accountId, mailboxId);
+  return {
+    messages,
+    total_count: messages.length,
+    unread_count: messages.filter((message) => !message.is_read).length,
+  };
+}
+
+function upsertMessages(store, messages) {
+  for (const message of messages) {
+    if (!message.email_id || !message.account_id) continue;
+    const key = `${message.account_id}:${message.email_id}`;
+    store.messages[key] = { ...store.messages[key], ...message, remote_sync_state: store.messages[key]?.remote_sync_state || 'synced' };
+  }
+  return store;
 }
 
 function normalizeAccounts(accounts) {
@@ -298,8 +476,8 @@ function normalizeMessage(message) {
     body_text: message.body_text || message.snippet || '',
     received_at: timestamp,
     sent_at: 0,
-    is_read: true,
-    is_flagged: false,
+    is_read: message.is_read ?? message.seen ?? true,
+    is_flagged: message.is_flagged ?? message.flagged ?? false,
     has_attachments: Boolean(message.has_attachments),
     importance: 'normal',
     categories: [],
@@ -387,6 +565,9 @@ const REST_OPERATIONS = {
     const account = accountPayload(payload);
     validateAccountPayload(account);
     const data = await apiJson('/api/v1/mail/accounts', { method: 'POST', body: JSON.stringify(account) });
+    const accountId = data.account?.account_id || account.account_id || account.email_address;
+    const store = ensureDefaultMailboxes(await readPersistentMailStore(accountId), accountId);
+    await writePersistentMailStore(store, accountId);
     return ok('complete_account_setup', {
       account: normalizeAccounts([data.account])[0],
       status: data.account?.status || 'active',
@@ -397,29 +578,60 @@ const REST_OPERATIONS = {
   },
   async list_mailboxes(payload) {
     const accountId = payload.account_id;
-    const inboxTotal = lastMailboxSnapshot.total_count;
-    const sentTotal = lastMailboxSnapshot.messages.filter((message) => message.mailbox_id === 'sent').length;
+    const store = refreshMailboxCounts(ensureDefaultMailboxes(await readPersistentMailStore(accountId), accountId), accountId);
+    await writePersistentMailStore(store, accountId);
+    const mailboxes = Object.values(store.mailboxes)
+      .filter((mailbox) => mailbox.account_id === accountId)
+      .sort((left, right) => {
+        const order = ['inbox', 'drafts', 'sent', 'archive', 'junk', 'trash', 'custom'];
+        return order.indexOf(left.kind) - order.indexOf(right.kind) || left.name.localeCompare(right.name);
+      });
     return ok('list_mailboxes', {
-      snapshot: [
-        { mailbox_id: 'inbox', account_id: accountId, name: 'INBOX', kind: 'inbox', unread_count: 0, total_count: inboxTotal, favorite: true },
-        { mailbox_id: 'drafts', account_id: accountId, name: 'Drafts', kind: 'drafts', unread_count: 0, total_count: 0, favorite: false },
-        { mailbox_id: 'sent', account_id: accountId, name: 'Sent', kind: 'sent', unread_count: 0, total_count: sentTotal, favorite: false },
-        { mailbox_id: 'archive', account_id: accountId, name: 'Archive', kind: 'archive', unread_count: 0, total_count: 0, favorite: false },
-        { mailbox_id: 'trash', account_id: accountId, name: 'Trash', kind: 'trash', unread_count: 0, total_count: 0, favorite: false },
-        { mailbox_id: 'junk', account_id: accountId, name: 'Junk', kind: 'junk', unread_count: 0, total_count: 0, favorite: false },
-      ],
-      total_count: 6,
+      snapshot: mailboxes,
+      total_count: mailboxes.length,
       refresh_requested: true,
     });
   },
   async read_emails(payload) {
-    const mailbox = (payload.mailbox_id || 'INBOX').toUpperCase();
+    const accountId = payload.account_id;
+    const mailboxId = String(payload.mailbox_id || 'inbox').toLowerCase();
+    const mailbox = mailboxId.toUpperCase();
     const params = new URLSearchParams({ mailbox, max_count: String(payload.pagination?.limit || 50) });
-    if (payload.account_id) params.set('account_id', payload.account_id);
-    const data = await apiJson(`/api/v1/mail/messages?${params.toString()}`);
-    const messages = (data.messages || []).map(normalizeMessage);
-    lastMailboxSnapshot = { messages, total_count: messages.length, unread_count: 0 };
-    return ok('read_emails', { snapshot: lastMailboxSnapshot, needs_host_refresh: false });
+    if (accountId) params.set('account_id', accountId);
+    let store = ensureDefaultMailboxes(await readPersistentMailStore(accountId), accountId);
+    try {
+      const data = await apiJson(`/api/v1/mail/messages?${params.toString()}`);
+      const messages = (data.messages || []).map(normalizeMessage).map((message) => ({ ...message, account_id: message.account_id || accountId, mailbox_id: mailboxId }));
+      store = refreshMailboxCounts(upsertMessages(store, messages), accountId);
+      await writePersistentMailStore(store, accountId);
+      lastMailboxSnapshot = snapshotForMailbox(store, accountId, mailboxId);
+      return ok('read_emails', { snapshot: lastMailboxSnapshot, needs_host_refresh: false });
+    } catch (error) {
+      if (!isRecoverableMailboxFetchError(error)) throw error;
+      const mailboxKey = `${accountId}:${mailboxId}`;
+      store.mailboxes[mailboxKey] = {
+        ...store.mailboxes[mailboxKey],
+        account_id: accountId,
+        mailbox_id: mailboxId,
+        name: store.mailboxes[mailboxKey]?.name || mailbox,
+        kind: store.mailboxes[mailboxKey]?.kind || mailboxId,
+        sync_state: 'failed',
+        last_error_code: 'imap_invalid_messageset',
+        last_error_message: error.message,
+      };
+      store = refreshMailboxCounts(store, accountId);
+      await writePersistentMailStore(store, accountId);
+      lastMailboxSnapshot = snapshotForMailbox(store, accountId, mailboxId);
+      return ok('read_emails', {
+        snapshot: lastMailboxSnapshot,
+        needs_host_refresh: true,
+        sync_warning: {
+          mailbox_id: mailboxId,
+          code: 'imap_invalid_messageset',
+          message: `${store.mailboxes[mailboxKey]?.name || mailbox} sync is delayed. Showing saved messages.`,
+        },
+      });
+    }
   },
   async get_email(payload) {
     const email = lastMailboxSnapshot.messages.find((message) => message.email_id === payload.email_id);
@@ -429,6 +641,28 @@ const REST_OPERATIONS = {
   async get_thread(payload) {
     const messages = lastMailboxSnapshot.messages.filter((message) => message.thread_id === payload.thread_id);
     return ok('get_thread', { thread_id: payload.thread_id, messages, needs_host_refresh: false });
+  },
+  async mark_read(payload) {
+    const accountId = payload.account_id;
+    const store = await readPersistentMailStore(accountId);
+    for (const emailId of payload.email_ids || []) {
+      const key = `${accountId}:${emailId}`;
+      if (store.messages[key]) store.messages[key] = { ...store.messages[key], is_read: Boolean(payload.read) };
+    }
+    refreshMailboxCounts(store, accountId);
+    await writePersistentMailStore(store, accountId);
+    lastMailboxSnapshot = snapshotForMailbox(store, accountId, payload.mailbox_id || lastMailboxSnapshot.messages[0]?.mailbox_id || 'inbox');
+    return ok('mark_read', { mutation: 'mark_read', resource_ids: payload.email_ids || [], applied: true });
+  },
+  async flag_email(payload) {
+    const accountId = payload.account_id;
+    const store = await readPersistentMailStore(accountId);
+    for (const emailId of payload.email_ids || []) {
+      const key = `${accountId}:${emailId}`;
+      if (store.messages[key]) store.messages[key] = { ...store.messages[key], is_flagged: Boolean(payload.flagged) };
+    }
+    await writePersistentMailStore(store, accountId);
+    return ok('flag_email', { mutation: 'flag_email', resource_ids: payload.email_ids || [], applied: true });
   },
   async search_emails(payload) {
     const query = String(payload.query || '').toLowerCase();
@@ -449,8 +683,84 @@ const REST_OPERATIONS = {
         body_html: draft.body_html || '',
       }),
     });
+    const accountId = payload.account_id || draft.account_id;
+    const account = normalizeAccounts((await apiJson('/api/v1/mail/accounts')).accounts || []).find((item) => item.account_id === accountId) || {};
+    const sentAt = Math.floor(Date.now() / 1000);
+    const sentMessage = {
+      email_id: data.message_id || payload.draft_id || `sent-${sentAt}`,
+      account_id: accountId,
+      mailbox_id: 'sent',
+      thread_id: data.message_id || payload.draft_id || `thread-${sentAt}`,
+      from: { email: account.email_address || '', display_name: account.display_name || account.account_label || account.email_address || '' },
+      to: (draft.to || []).map((recipient) => ({ email: recipient.email || recipient, display_name: recipient.display_name || recipient.email || recipient })),
+      cc: (draft.cc || []).map((recipient) => ({ email: recipient.email || recipient, display_name: recipient.display_name || recipient.email || recipient })),
+      bcc: (draft.bcc || []).map((recipient) => ({ email: recipient.email || recipient, display_name: recipient.display_name || recipient.email || recipient })),
+      subject: draft.subject || '(no subject)',
+      preview: draft.body_text || draft.body_html || '',
+      body_html: draft.body_html || '',
+      body_text: draft.body_text || '',
+      received_at: sentAt,
+      sent_at: sentAt,
+      is_read: true,
+      is_flagged: false,
+      has_attachments: Boolean(draft.attachments?.length),
+      importance: draft.importance || 'normal',
+      categories: [],
+      attachments: draft.attachments || [],
+      remote_sync_state: 'synced',
+    };
+    const store = refreshMailboxCounts(upsertMessages(ensureDefaultMailboxes(await readPersistentMailStore(accountId), accountId), [sentMessage]), accountId);
+    await writePersistentMailStore(store, accountId);
     if (payload.draft_id) draftStore.delete(payload.draft_id);
-    return ok('send_email', { draft_id: payload.draft_id || '', account_id: payload.account_id, undo_window_seconds: 0, notify: true, message_id: data.message_id });
+    return ok('send_email', { draft_id: payload.draft_id || '', account_id: payload.account_id, undo_window_seconds: 0, notify: true, message_id: sentMessage.email_id });
+  },
+  async move_email(payload) {
+    const accountId = payload.account_id;
+    const destinationMailboxId = String(payload.destination_mailbox_id || '').toLowerCase();
+    const emailIds = payload.email_ids || [];
+    const store = ensureDefaultMailboxes(await readPersistentMailStore(accountId), accountId);
+    const destination = store.mailboxes[`${accountId}:${destinationMailboxId}`];
+    if (!destination) throw new Error('Destination folder is not available.');
+    const movedAt = Math.floor(Date.now() / 1000);
+    const operationId = crypto.randomUUID?.() || `${movedAt}-${Math.random().toString(36).slice(2)}`;
+    const movedIds = [];
+    for (const emailId of emailIds) {
+      const key = `${accountId}:${emailId}`;
+      const message = store.messages[key];
+      if (!message) continue;
+      store.messages[key] = {
+        ...message,
+        previous_mailbox_id: message.mailbox_id,
+        mailbox_id: destinationMailboxId,
+        moved_at: movedAt,
+        remote_sync_state: 'pending_remote_move',
+      };
+      movedIds.push(emailId);
+    }
+    store.operations.push({
+      operation: 'move',
+      operation_id: operationId,
+      account_id: accountId,
+      email_ids: movedIds,
+      destination_mailbox_id: destinationMailboxId,
+      status: 'pending_remote_move',
+      created_at: movedAt,
+    });
+    refreshMailboxCounts(store, accountId);
+    await writePersistentMailStore(store, accountId);
+    return ok('move_email', {
+      mutation: 'move_email',
+      resource_ids: movedIds,
+      destination_mailbox_id: destinationMailboxId,
+      applied: movedIds.length === emailIds.length,
+      sync_state: 'pending_remote_move',
+    });
+  },
+  async archive_email(payload) {
+    return REST_OPERATIONS.move_email({ ...payload, destination_mailbox_id: 'archive' });
+  },
+  async delete_email(payload) {
+    return REST_OPERATIONS.move_email({ ...payload, destination_mailbox_id: 'trash' });
   },
 };
 

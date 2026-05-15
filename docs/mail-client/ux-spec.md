@@ -2,7 +2,7 @@
 
 Stage: 1 - UX-Spec  
 App: `apps/first-party/mail-client`  
-Date: 2026-05-08
+Date: 2026-05-15
 
 ## 1. Product Scope
 
@@ -32,6 +32,26 @@ The app follows familiar Outlook, Gmail, and Apple Mail patterns: account and fo
 - A user with multiple accounts can understand which account a message belongs to, choose the sender identity, set a default, and manage signatures and aliases.
 - An agent can read, draft, send, organize, and schedule mail only within granted permissions, with user-visible audit and review points for sensitive operations.
 - Failure states are recoverable without data loss, especially for account connection, sync, compose autosave, send, and conflicting changes.
+
+### May 15 Folder And Persistence Correction
+
+This correction addresses the current mail-client reliability goal: entries must appear in all folders, the Sent folder must not break the workspace when live IMAP fetch returns `502` / `BAD FETCH Invalid messageset`, mail snapshots must persist across app sessions, and moving messages between folders must be supported and testable.
+
+Liaison-validated platform assumptions:
+
+- Available now: the app can persist app-owned mail metadata and message snapshots through generic `PutDocument` and `QueryDocuments` effects. These documents are scoped by `app_id` and `principal_id` by the host.
+- Available now: the app can implement a metadata-local move by updating its persisted message record, source/target folder ids, folder counts, and `sync_state` without requiring an upstream IMAP move to succeed immediately.
+- Required caveat: true upstream IMAP move/sync is platform-required. The current mail proxy supports `ImapFetch` and `SmtpSend`, but does not expose a validated move/copy/delete operation. Live Sent fetch can return `BAD FETCH Invalid messageset`, so the app must not treat a Sent fetch failure as an empty or fatal mailbox state.
+- Required caveat: until the platform exposes upstream IMAP move/sync, moved messages must carry `sync_state: "pending_remote_move"` and be shown as locally organized with pending remote reconciliation.
+
+App-side UX behavior for this slice:
+
+- Every folder view uses persisted app-side mail documents as the durable baseline and overlays fresh host fetch results when available.
+- Folder navigation includes Inbox, Sent, Drafts, Archive, Junk, Trash, and custom folders when those folders exist in persisted metadata, even if a live fetch for one folder fails.
+- Sent folder `502` / `BAD FETCH Invalid messageset` errors are shown as a recoverable sync warning for Sent only; the workspace, other folders, and persisted Sent entries remain visible.
+- A successful local move immediately removes the message from the source folder, adds it to the target folder, updates counts, and records `sync_state: "pending_remote_move"` until platform reconciliation is available.
+- The UI distinguishes locally persisted data from live sync freshness using quiet status text such as last synced time, pending remote move, or folder sync warning.
+- Agents with organize permission can perform the same local move workflow and receive structured pending-sync status in the tool response.
 
 ## 2. Current UX Problem To Replace
 
@@ -493,6 +513,19 @@ The UI must show relevant capability state without overwhelming normal mail use:
 - Given a user deletes a non-empty custom folder, when they confirm, then the app explains where contained messages will go before applying the action.
 - Given a user creates a rule from selected messages, when the rule is saved, then the rule appears in the rules list with account scope and enabled state.
 
+### Folder Persistence And Local Moves
+
+- Given persisted mail documents exist for Inbox, Sent, Drafts, Archive, Junk, Trash, and custom folders, when the user opens the app after a fresh session, then every folder with persisted entries appears in navigation and its entries are visible without requiring a successful live IMAP fetch first.
+- Given a live folder fetch succeeds, when the app receives fresher message metadata, then the persisted folder documents are updated through app-side persistence and the user sees refreshed rows, counts, and last-sync state.
+- Given the Sent folder live fetch returns `502` / `BAD FETCH Invalid messageset`, when the user opens Sent, then persisted Sent entries remain visible, the Sent folder shows a recoverable sync warning, and other folders remain usable.
+- Given one folder returns a live fetch error, when the user switches to another folder, then the failing folder state does not clear or block the other folder's persisted entries.
+- Given the user moves one or more messages from a source folder to a target folder, when the local move is accepted, then the source list removes the messages, the target list includes them, both folder counts update, and each moved message records `sync_state: "pending_remote_move"`.
+- Given a locally moved message has `sync_state: "pending_remote_move"`, when the user views the message row or message details, then the UI indicates the message is organized locally and waiting for remote sync instead of claiming final upstream IMAP completion.
+- Given the app is reopened after a local move, when the persisted documents are queried, then the moved message remains in the target folder with `sync_state: "pending_remote_move"` until a future platform remote-move reconciliation clears or changes that state.
+- Given local move persistence fails, when the user attempts to move messages, then the UI leaves the messages in their original folder, shows a recoverable error, and does not display a false pending-remote state.
+- Given an agent with `mail:organize` moves messages folder-to-folder, when the action is accepted, then the headless result includes source folder, target folder, moved message ids, updated local state, and `sync_state: "pending_remote_move"`.
+- Given an agent without `mail:organize` attempts a folder-to-folder move, when the tool is invoked, then the operation is denied and no persisted message documents or folder counts change.
+
 ### Agents And Permissions
 
 - Given an agent has `mail:read`, when it tries to send, then the Wasm/tool response denies the operation and the UI can show that send permission is not granted.
@@ -523,6 +556,7 @@ The UI must show relevant capability state without overwhelming normal mail use:
 - Should focused inbox be implemented in host mail classification, user rules, or postponed until a host classifier exists?
 - What audit metadata does the Broker expose for agent-created drafts, sends, moves, deletes, and rules?
 - Does the host provide cached/offline mail snapshots, or should offline state always be treated as degraded online-only access?
+- When will the platform expose true IMAP move/copy/delete and reconciliation effects beyond `ImapFetch` and `SmtpSend`, and what success/failure states should clear `pending_remote_move`?
 - Should account setup live entirely inside the app route, the Synapp user settings shell, or both as deep-linked surfaces?
 
 ## 13. Pipeline Handoff Notes
@@ -532,6 +566,8 @@ Architect should translate this UX spec into updated contracts for:
 - Real UI entrypoint behavior for the main route instead of host-rendered configuration schemas.
 - User-scoped account setup and preference schemas with explicit section names.
 - Host effects for account connection tests, credential writes, OAuth connect/disconnect, sync status, and provider capability discovery.
+- App-side persistence using `PutDocument`/`QueryDocuments` for durable folder/message snapshots, plus local folder-to-folder move semantics with `sync_state: "pending_remote_move"`.
+- Platform-required upstream IMAP move/sync reconciliation, because current mail proxy capability is limited to `ImapFetch` and `SmtpSend` and live Sent can return `BAD FETCH Invalid messageset`.
 - Existing mail tool coverage alignment for read, search, get thread, mark/flag, draft/update/discard, send/reply/forward, move/delete/archive, folders, unread counts, rules, schedule/cancel send.
 
 UI-Designer should produce an inbox-first layout and account setup flow that covers all loading, empty, error, conflict, and recovery states above.
