@@ -147,7 +147,7 @@ scripts/package_app.sh apps/first-party/mail-client
 
 Expected output:
 
-- `packages/mail-client-2.1.0.tar.gz`
+- `packages/mail-client-2.1.1.tar.gz`
 
 The package script currently bundles:
 
@@ -171,7 +171,7 @@ The package script currently bundles:
 
 If your host supports direct local package import:
 
-1. Generate `packages/mail-client-2.1.0.tar.gz`.
+1. Generate `packages/mail-client-2.1.1.tar.gz`.
 2. Import that archive into the host installer.
 3. Verify the host unpacks `synapp.app.json` and the Wasm entrypoint correctly.
 4. Open the host settings panel and configure at least one mail account in `Mail Accounts`.

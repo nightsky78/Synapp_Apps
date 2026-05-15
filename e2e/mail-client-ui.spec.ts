@@ -29,6 +29,86 @@ test.describe('Mail Client packaged UI', () => {
     });
   });
 
+  test('TC-SA-MAIL-UI-000: no host bridge does not render sample inbox data', async ({ page }) => {
+    await page.route('**/api/v1/mail/accounts', async (route) => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ accounts: [] }) });
+    });
+
+    await page.goto(mailUiUrl);
+
+    await expect(page.getByRole('heading', { name: 'Add your first mail account' })).toBeVisible();
+    await expect(page.getByText('Alice Chen')).toHaveCount(0);
+    await expect(page.getByText('Synapp Scheduler')).toHaveCount(0);
+    await expect(page.getByText('Scheduled send queued for Friday')).toHaveCount(0);
+  });
+
+  test('TC-SA-MAIL-UI-006: no host bridge renders real mail API account and message responses', async ({ page }) => {
+    const apiCalls: string[] = [];
+    await page.route('**/api/v1/mail/accounts', async (route) => {
+      apiCalls.push(route.request().method() + ' ' + new URL(route.request().url()).pathname);
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          accounts: [{
+            account_id: 'real-account-1',
+            account_label: 'Real mailbox',
+            display_name: 'Real User',
+            email_address: 'real@example.com',
+            provider: 'manual_imap_smtp',
+            auth_method: 'password',
+            incoming: { host: 'imap.example.com', port: 993, security: 'ssl_tls', username: 'real@example.com' },
+            outgoing: { host: 'smtp.example.com', port: 587, security: 'starttls', username: 'real@example.com' },
+            credential_state: 'stored',
+            incoming_secret_ref: 'mail:real-account-1:password',
+            outgoing_secret_ref: 'mail:real-account-1:password',
+            status: 'active',
+            is_default: true,
+            last_test_at: '2026-05-14T09:00:00Z',
+            connection_state: { account_state: 'active' },
+          }],
+        }),
+      });
+    });
+    await page.route('**/api/v1/mail/messages?**', async (route) => {
+      apiCalls.push(route.request().method() + ' ' + new URL(route.request().url()).pathname);
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          account: { account_id: 'real-account-1', account_label: 'Real mailbox', email_address: 'real@example.com', status: 'active' },
+          mailbox: 'INBOX',
+          messages: [{
+            id: 'real-message-1',
+            uid: '42',
+            message_id: '<real-message-1@example.com>',
+            account_id: 'real-account-1',
+            mailbox: 'INBOX',
+            from: { name: 'Real Sender', email: 'sender@example.com' },
+            to: [{ name: 'Real User', email: 'real@example.com' }],
+            subject: 'Real IMAP message',
+            snippet: 'This message came from the platform mail API.',
+            body_text: 'This message came from the platform mail API.',
+            body_html: '<p>This message came from the platform mail API.</p>',
+            date_iso: '2026-05-14T08:30:00Z',
+            has_attachments: false,
+          }],
+        }),
+      });
+    });
+
+    await page.goto(mailUiUrl);
+
+    await expect(page.getByLabel('Account scope')).toHaveValue('real-account-1');
+    await expect(page.getByRole('button', { name: /Email from Real Sender: Real IMAP message/ })).toBeVisible();
+    await page.getByRole('button', { name: /Email from Real Sender: Real IMAP message/ }).click();
+    await expect(page.getByRole('heading', { name: 'Real IMAP message' })).toBeVisible();
+    await expect(page.getByLabel('Email content').getByText('This message came from the platform mail API.')).toBeVisible();
+    expect(apiCalls).toContain('GET /api/v1/mail/accounts');
+    expect(apiCalls).toContain('GET /api/v1/mail/messages');
+    await expect(page.getByText('Alice Chen')).toHaveCount(0);
+  });
+
   test('TC-SA-MAIL-UI-001: mailbox read, search, flag, and bulk archive journeys update visible state', async ({ page }) => {
     await openMailUi(page, { permission: 'admin' });
 
@@ -109,7 +189,7 @@ test.describe('Mail Client packaged UI', () => {
     await page.getByLabel('IMAP host').fill('imap.example.com');
     await page.getByLabel('SMTP host').fill('smtp.example.com');
     await page.getByRole('button', { name: 'Test connection' }).click();
-    await expect(page.getByText('Connection test planned')).toBeVisible();
+    await expect(page.getByLabel('Notifications').getByText('Connection test completed', { exact: true })).toBeVisible();
     await expect(page.getByText('passed').first()).toBeVisible();
     await page.getByRole('button', { name: 'Save receive-only' }).click();
     await expect(page.getByText('Account saved as receive-only')).toBeVisible();

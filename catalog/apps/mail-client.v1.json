@@ -4,17 +4,17 @@
   "name": "Mail Client",
   "summary": "Inbox-first Synapp mail workspace with user-scoped account setup and AI-invocable tools.",
   "description": "First-party Synapp mail client. The packaged React UI is the main inbox-first workspace for mailbox navigation, reading, search, compose, sending, scheduling, folders, rules, account setup, identities, signatures, preferences, and agent permission review. The Wasm module remains a command planner; host services own IMAP, SMTP, OAuth, credentials, persistence, scheduling, and audit.",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "publisher": "Synapp",
   "category": "productivity",
   "repository_url": "https://github.com/nightsky78/Synapp_Apps/",
-  "package_url": "https://github.com/nightsky78/Synapp_Apps/releases/download/mail-client-v2.1.0/mail-client-2.1.0.tar.gz",
-  "package_sha256": "f4fdaca8179dd58aa5a808d9cbfc137c0a380bed82efc464146545bbb994ac28",
-  "manifest_sha256": "f7c98f4cc479a5f1dfc9c2a10940f41f88c2fc72610807363b1236a053cec081",
+  "package_url": "https://github.com/nightsky78/Synapp_Apps/releases/download/mail-client-v2.1.1/mail-client-2.1.1.tar.gz",
+  "package_sha256": "1971fa47e3aa1cf461559d2a0dd1d6b0369b2b50ca54795e1a9056005b3f364f",
+  "manifest_sha256": "a889835d3e037096401c8ef78df24c4914ae05f6deb7bd02190644516231581e",
   "signature": {
     "type": "metadata-only",
     "signer": "synapp-dev-catalog",
-    "value": "metadata-only:mail-client:2.1.0",
+    "value": "metadata-only:mail-client:2.1.1",
     "verification_status": "metadata_verified"
   },
   "source": {
@@ -27,7 +27,7 @@
     "schema_version": "1.0.0",
     "app_id": "mail-client",
     "name": "Mail Client",
-    "version": "2.1.0",
+    "version": "2.1.1",
     "summary": "Inbox-first Synapp mail workspace with user-scoped account setup and AI-invocable tools.",
     "description": "First-party Synapp mail client. The packaged React UI is the main inbox-first workspace for mailbox navigation, reading, search, compose, sending, scheduling, folders, rules, account setup, identities, signatures, preferences, and agent permission review. The Wasm module remains a command planner; host services own IMAP, SMTP, OAuth, credentials, persistence, scheduling, and audit.",
     "publisher": {

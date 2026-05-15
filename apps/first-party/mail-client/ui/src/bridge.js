@@ -8,11 +8,12 @@
  * This module wraps those calls and provides a typed, error-normalised API
  * for the React frontend. All Wasm operations are dispatched through invoke().
  *
- * During local development (no host present), a stub implementation is used
- * so the UI can render with sample data.
+ * If the host bridge is not injected, the packaged UI talks to the host-owned
+ * mail REST API. It must never silently render sample mail as if it were the
+ * user's inbox.
  */
 
-const isDev = !window.__synapp;
+const hasHostBridge = Boolean(window.__synapp);
 
 // ─── Development stub ────────────────────────────────────────────────────────
 
@@ -206,11 +207,251 @@ const STUB_RESPONSES = {
   migrate_legacy_settings: () => ({ ok: { operation: 'migrate_legacy_settings', status: 'accepted', data: { migrated: true, accounts_requiring_reconnect: [], removed_keys: ['ui_schemas.main'] }, host_effects: [], warnings: [] } }),
 };
 
+// ─── Host REST bridge ────────────────────────────────────────────────────────
+
+const REST_CONTEXT = {
+  user_id: 'current-user',
+  permission: 'admin',
+  available_effects: [
+    'AccountCredentialRead',
+    'AccountCredentialWrite',
+    'ProviderCapabilityRead',
+    'ImapFetch',
+    'ImapSync',
+    'SmtpSend',
+    'MailStoreRead',
+    'MailStoreWrite',
+    'MailStoreDelete',
+  ],
+  agent_id: null,
+  request_id: null,
+};
+
+let lastMailboxSnapshot = { messages: [], total_count: 0, unread_count: 0 };
+const draftStore = new Map();
+
+function getAccessToken() {
+  if (typeof window.__synappAccessToken === 'string') return window.__synappAccessToken;
+  if (typeof window.__SYNAPP_ACCESS_TOKEN__ === 'string') return window.__SYNAPP_ACCESS_TOKEN__;
+  const meta = document.querySelector('meta[name="synapp-access-token"]');
+  return meta?.getAttribute('content') || '';
+}
+
+async function apiJson(path, init = {}) {
+  const headers = new Headers(init.headers);
+  const token = getAccessToken();
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+  const response = await fetch(path, { ...init, headers, credentials: 'same-origin' });
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(apiErrorMessage(response.status, body));
+  }
+  return response.json();
+}
+
+function apiErrorMessage(status, body) {
+  try {
+    const parsed = JSON.parse(body);
+    if (typeof parsed.error === 'string') return parsed.error;
+    if (typeof parsed.message === 'string') return parsed.message;
+  } catch (_) {
+    // Body is plain text or empty.
+  }
+  if (status === 401) return 'Sign in through Synapp before opening the mail app.';
+  if (status === 403) return 'Your session is missing the required mail permission.';
+  return body || `Mail API request failed with HTTP ${status}`;
+}
+
+function ok(operation, data) {
+  return { operation, status: 'accepted', data, host_effects: [], warnings: [] };
+}
+
+function normalizeAccounts(accounts) {
+  return accounts.map((account) => ({
+    ...account,
+    provider: account.provider || 'manual_imap_smtp',
+    connection_state: account.connection_state?.account_state || account.status || 'unknown',
+    connection_result: account.connection_state,
+    enabled: account.status !== 'blocked',
+    sync_interval_minutes: account.sync_interval_minutes || 15,
+    color: account.color || '#0078d4',
+    last_sync_at: account.last_sync_at || (account.last_test_at ? Math.floor(Date.parse(account.last_test_at) / 1000) : 0),
+    unread_count: account.unread_count || 0,
+  }));
+}
+
+function normalizeMessage(message) {
+  const timestamp = message.date_iso ? Math.floor(Date.parse(message.date_iso) / 1000) : 0;
+  return {
+    email_id: message.id || message.uid || message.message_id,
+    account_id: message.account_id,
+    mailbox_id: String(message.mailbox || 'INBOX').toLowerCase(),
+    thread_id: message.message_id || message.id || message.uid,
+    from: { email: message.from?.email || '', display_name: message.from?.name || message.from?.email || '' },
+    to: (message.to || []).map((address) => ({ email: address.email || '', display_name: address.name || address.email || '' })),
+    cc: [],
+    bcc: [],
+    subject: message.subject || '(no subject)',
+    preview: message.snippet || message.body_text || '',
+    body_html: message.body_html || '',
+    body_text: message.body_text || message.snippet || '',
+    received_at: timestamp,
+    sent_at: 0,
+    is_read: true,
+    is_flagged: false,
+    has_attachments: Boolean(message.has_attachments),
+    importance: 'normal',
+    categories: [],
+    attachments: [],
+  };
+}
+
+function accountPayload(input) {
+  const account = input.account || input;
+  return {
+    account_id: account.account_id,
+    account_label: account.account_label || account.email_address,
+    display_name: account.display_name || account.email_address,
+    email_address: account.email_address,
+    reply_to: account.reply_to,
+    incoming: account.incoming,
+    outgoing: account.outgoing,
+    password: account.password || '',
+    make_default: Boolean(input.make_default),
+    send_test_message: Boolean(account.send_test_message || input.send_test_message),
+  };
+}
+
+function validateAccountPayload(payload) {
+  const errors = [];
+  if (!payload.email_address) errors.push('Email address is required.');
+  if (!payload.incoming?.host) errors.push('IMAP host is required.');
+  if (!payload.outgoing?.host) errors.push('SMTP host is required.');
+  if (!payload.password) errors.push('Password or app password is required.');
+  if (errors.length) throw new Error(errors.join(' '));
+}
+
+const REST_OPERATIONS = {
+  async list_accounts() {
+    const data = await apiJson('/api/v1/mail/accounts');
+    const accounts = normalizeAccounts(data.accounts || []);
+    return ok('list_accounts', { snapshot: accounts, total_count: accounts.length, refresh_requested: true });
+  },
+  async get_provider_capabilities() {
+    return ok('get_provider_capabilities', {
+      providers: [],
+      manual_imap_smtp: { enabled: true, security_modes: ['ssl_tls', 'starttls'], default_imap_port: 993, default_smtp_port: 587 },
+      policy: { allow_receive_only: true, min_sync_interval_minutes: 5, max_recipients: 100 },
+      oauth_placeholders: [],
+    });
+  },
+  async validate_account_setup(payload) {
+    const account = accountPayload(payload);
+    validateAccountPayload(account);
+    return ok('validate_account_setup', { valid: true, normalized_account: account, field_errors: [], warnings: [], next_required_action: 'test_connection' });
+  },
+  async plan_connection_test(payload) {
+    const account = accountPayload(payload);
+    validateAccountPayload(account);
+    const data = await apiJson('/api/v1/mail/accounts/test', { method: 'POST', body: JSON.stringify(account) });
+    return ok('plan_connection_test', {
+      account_id: account.account_id || account.email_address,
+      test_id: data.result?.tested_at || new Date().toISOString(),
+      requires_host_execution: false,
+      steps: ['imap_auth', 'imap_mailbox_discovery', 'smtp_auth'],
+      incoming: data.result?.incoming?.state || 'not_tested',
+      outgoing: data.result?.outgoing?.state || 'not_tested',
+      folders: data.result?.incoming?.state === 'passed' ? 'passed' : 'not_tested',
+      message: data.result?.incoming?.message || data.result?.outgoing?.message || 'Connection test completed by Synapp host.',
+      result: data.result,
+    });
+  },
+  async draft_email(payload) {
+    const draft = payload.draft || {};
+    const draftId = draft.draft_id || `draft-${crypto.randomUUID?.() || Date.now()}`;
+    draftStore.set(draftId, { ...draft, draft_id: draftId });
+    return ok('draft_email', { draft: draftStore.get(draftId), suggested_draft_id: draftId });
+  },
+  async update_draft(payload) {
+    const draft = payload.draft || {};
+    const draftId = draft.draft_id || `draft-${crypto.randomUUID?.() || Date.now()}`;
+    draftStore.set(draftId, { ...draft, draft_id: draftId });
+    return ok('update_draft', { draft: draftStore.get(draftId), suggested_draft_id: draftId });
+  },
+  async discard_draft(payload) {
+    draftStore.delete(payload.draft_id);
+    return ok('discard_draft', { mutation: 'discard_draft', resource_ids: [payload.draft_id], applied: true });
+  },
+  async complete_account_setup(payload) {
+    const account = accountPayload(payload);
+    validateAccountPayload(account);
+    const data = await apiJson('/api/v1/mail/accounts', { method: 'POST', body: JSON.stringify(account) });
+    return ok('complete_account_setup', {
+      account: normalizeAccounts([data.account])[0],
+      status: data.account?.status || 'active',
+      requires_reconnect: false,
+      requires_sync: true,
+      result: data.result,
+    });
+  },
+  async list_mailboxes(payload) {
+    const accountId = payload.account_id;
+    return ok('list_mailboxes', {
+      snapshot: [
+        { mailbox_id: 'inbox', account_id: accountId, name: 'INBOX', kind: 'inbox', unread_count: 0, total_count: lastMailboxSnapshot.total_count, favorite: true },
+      ],
+      total_count: 1,
+      refresh_requested: true,
+    });
+  },
+  async read_emails(payload) {
+    const mailbox = (payload.mailbox_id || 'INBOX').toUpperCase();
+    const params = new URLSearchParams({ mailbox, max_count: String(payload.pagination?.limit || 50) });
+    if (payload.account_id) params.set('account_id', payload.account_id);
+    const data = await apiJson(`/api/v1/mail/messages?${params.toString()}`);
+    const messages = (data.messages || []).map(normalizeMessage);
+    lastMailboxSnapshot = { messages, total_count: messages.length, unread_count: 0 };
+    return ok('read_emails', { snapshot: lastMailboxSnapshot, needs_host_refresh: false });
+  },
+  async get_email(payload) {
+    const email = lastMailboxSnapshot.messages.find((message) => message.email_id === payload.email_id);
+    if (!email) throw new Error('Message is not loaded. Refresh the mailbox and try again.');
+    return ok('get_email', email);
+  },
+  async get_thread(payload) {
+    const messages = lastMailboxSnapshot.messages.filter((message) => message.thread_id === payload.thread_id);
+    return ok('get_thread', { thread_id: payload.thread_id, messages, needs_host_refresh: false });
+  },
+  async search_emails(payload) {
+    const query = String(payload.query || '').toLowerCase();
+    const results = lastMailboxSnapshot.messages.filter((message) => `${message.subject} ${message.preview} ${message.body_text} ${message.from.email}`.toLowerCase().includes(query));
+    return ok('search_emails', { query: payload.query, snapshot: { results, total_count: results.length }, needs_host_refresh: false });
+  },
+  async send_email(payload) {
+    const draft = draftStore.get(payload.draft_id) || payload.draft || payload;
+    const data = await apiJson('/api/v1/mail/send', {
+      method: 'POST',
+      body: JSON.stringify({
+        account_id: payload.account_id || draft.account_id,
+        to: (draft.to || []).map((recipient) => recipient.email || recipient).join(','),
+        cc: (draft.cc || []).map((recipient) => recipient.email || recipient).join(','),
+        bcc: (draft.bcc || []).map((recipient) => recipient.email || recipient).join(','),
+        subject: draft.subject || '',
+        body_text: draft.body_text || '',
+        body_html: draft.body_html || '',
+      }),
+    });
+    if (payload.draft_id) draftStore.delete(payload.draft_id);
+    return ok('send_email', { draft_id: payload.draft_id || '', account_id: payload.account_id, undo_window_seconds: 0, notify: true, message_id: data.message_id });
+  },
+};
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 export function getContext() {
-  if (isDev) return STUB_CONTEXT;
-  return window.__synapp.getContext();
+  if (hasHostBridge) return window.__synapp.getContext();
+  return REST_CONTEXT;
 }
 
 /**
@@ -222,12 +463,12 @@ export async function invoke(operation, payload = {}) {
   const fullPayload = { context, ...payload };
 
   let raw;
-  if (isDev) {
-    const handler = STUB_RESPONSES[operation];
-    if (!handler) throw new Error(`Unknown operation: ${operation}`);
-    raw = handler(fullPayload);
-  } else {
+  if (hasHostBridge) {
     raw = await window.__synapp.invoke(operation, fullPayload);
+  } else if (REST_OPERATIONS[operation]) {
+    raw = { ok: await REST_OPERATIONS[operation](fullPayload) };
+  } else {
+    throw new Error(`Operation ${operation} requires Synapp host bridge support.`);
   }
 
   if (raw && raw.err) {

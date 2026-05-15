@@ -19,7 +19,7 @@
     {
       "app_id": "mail-client",
       "catalog_entry": "catalog/apps/mail-client.v1.json",
-      "latest_version": "2.1.0",
+      "latest_version": "2.1.1",
       "channel": "stable",
       "publisher": "Synapp"
     },

@@ -1,6 +1,6 @@
 {
   "name": "MailClient",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "description": "Production Synapp mail client. The Wasm module is a pure planner and validator for human UI flows and AI tool invocations; the host owns account settings, protocol I/O, scheduling, and persistence.",
   "executionInterface": {
     "wasmTarget": "wasm32-wasip1",

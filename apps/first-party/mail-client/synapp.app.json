@@ -3,7 +3,7 @@
   "schema_version": "1.0.0",
   "app_id": "mail-client",
   "name": "Mail Client",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "summary": "Inbox-first Synapp mail workspace with user-scoped account setup and AI-invocable tools.",
   "description": "First-party Synapp mail client. The packaged React UI is the main inbox-first workspace for mailbox navigation, reading, search, compose, sending, scheduling, folders, rules, account setup, identities, signatures, preferences, and agent permission review. The Wasm module remains a command planner; host services own IMAP, SMTP, OAuth, credentials, persistence, scheduling, and audit.",
   "publisher": {

@@ -20,6 +20,8 @@ const DEFAULT_ACCOUNT_FORM = {
   outgoing_security: 'starttls',
   outgoing_username: '',
   use_incoming_secret: true,
+  password: '',
+  send_test_message: false,
   incoming_secret_handle: 'host-secure-field:incoming',
   outgoing_secret_handle: 'host-secure-field:outgoing',
   sync_interval_minutes: 15,
@@ -78,6 +80,8 @@ function buildAccountPayload(form) {
       use_incoming_secret: form.use_incoming_secret,
       secret_input_ref: form.use_incoming_secret ? undefined : form.outgoing_secret_handle,
     },
+    password: form.password,
+    send_test_message: form.send_test_message,
     sync: {
       interval_minutes: Number(form.sync_interval_minutes),
       initial_range: form.initial_range,
@@ -128,9 +132,15 @@ export function AccountSetup({ firstRun = false }) {
     try {
       const account = buildAccountPayload(form);
       await invoke('validate_account_setup', { account });
-      await invoke('plan_connection_test', { account, test_scope: scope });
-      setTestResult({ incoming: 'passed', outgoing: scope === 'incoming' ? 'not_tested' : 'passed', folders: 'passed', message: 'Incoming, outgoing, and folder mapping checks are ready for host execution.' });
-      toast('Connection test planned', 'success');
+      const planned = await invoke('plan_connection_test', { account, test_scope: scope, send_test_message: scope !== 'incoming' });
+      setTestResult({
+        incoming: planned.data.incoming || 'not_tested',
+        outgoing: scope === 'incoming' ? 'not_tested' : planned.data.outgoing || 'not_tested',
+        folders: planned.data.folders || (planned.data.incoming === 'passed' ? 'passed' : 'not_tested'),
+        message: planned.data.message || 'Connection test completed by Synapp host.',
+        result: planned.data.result,
+      });
+      toast('Connection test completed', 'success');
     } catch (err) {
       setTestResult({ incoming: 'failed', outgoing: 'warning', folders: 'not_tested', message: err.message });
       toast(`Connection test failed: ${err.message}`, 'error');
@@ -227,6 +237,10 @@ export function AccountSetup({ firstRun = false }) {
               <div className="settings-section">
                 <h2>Authentication</h2>
                 <Field label="Method" htmlFor="auth-method"><select id="auth-method" className="form-select" value={form.auth_method} onChange={event => update('auth_method', event.target.value)}><option value="app_password">Password or app password</option><option value="password">Password</option><option value="oauth2">OAuth token reference</option></select></Field>
+                <Field label="Password or app password" htmlFor="mail-password" hint="Submitted directly to Synapp host for account testing and encrypted storage; never stored in the app UI.">
+                  <input id="mail-password" className="form-input" type="password" value={form.password} onChange={event => update('password', event.target.value)} autoComplete="new-password" />
+                </Field>
+                <label className="checkbox-line"><input type="checkbox" checked={form.send_test_message} onChange={event => update('send_test_message', event.target.checked)} /> Send a loopback SMTP test message when testing outgoing mail</label>
                 <Field label="Incoming credential" htmlFor="incoming-secret-handle" hint="Credentials are captured by Synapp host secure fields. The app receives only the selected opaque handle.">
                   <select id="incoming-secret-handle" className="form-select" value={form.incoming_secret_handle} onChange={event => update('incoming_secret_handle', event.target.value)}>
                     <option value="host-secure-field:incoming">Host secure field: incoming</option>
