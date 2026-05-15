@@ -397,11 +397,18 @@ const REST_OPERATIONS = {
   },
   async list_mailboxes(payload) {
     const accountId = payload.account_id;
+    const inboxTotal = lastMailboxSnapshot.total_count;
+    const sentTotal = lastMailboxSnapshot.messages.filter((message) => message.mailbox_id === 'sent').length;
     return ok('list_mailboxes', {
       snapshot: [
-        { mailbox_id: 'inbox', account_id: accountId, name: 'INBOX', kind: 'inbox', unread_count: 0, total_count: lastMailboxSnapshot.total_count, favorite: true },
+        { mailbox_id: 'inbox', account_id: accountId, name: 'INBOX', kind: 'inbox', unread_count: 0, total_count: inboxTotal, favorite: true },
+        { mailbox_id: 'drafts', account_id: accountId, name: 'Drafts', kind: 'drafts', unread_count: 0, total_count: 0, favorite: false },
+        { mailbox_id: 'sent', account_id: accountId, name: 'Sent', kind: 'sent', unread_count: 0, total_count: sentTotal, favorite: false },
+        { mailbox_id: 'archive', account_id: accountId, name: 'Archive', kind: 'archive', unread_count: 0, total_count: 0, favorite: false },
+        { mailbox_id: 'trash', account_id: accountId, name: 'Trash', kind: 'trash', unread_count: 0, total_count: 0, favorite: false },
+        { mailbox_id: 'junk', account_id: accountId, name: 'Junk', kind: 'junk', unread_count: 0, total_count: 0, favorite: false },
       ],
-      total_count: 1,
+      total_count: 6,
       refresh_requested: true,
     });
   },

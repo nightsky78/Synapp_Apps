@@ -49,6 +49,7 @@ export default function Toolbar() {
 
       <button
         className="top-bar__btn top-bar__btn--compose"
+        data-testid="compose-btn"
         onClick={() => openCompose()}
         title="Compose new email"
         aria-label="Compose new email"
@@ -60,6 +61,7 @@ export default function Toolbar() {
       {state.accounts.length > 0 && (
         <select
           className="top-bar__account-select"
+          data-testid="account-select"
           value={state.activeAccountId || ''}
           onChange={event => dispatch({ type: 'SET_ACTIVE_ACCOUNT', payload: event.target.value })}
           aria-label="Account scope"

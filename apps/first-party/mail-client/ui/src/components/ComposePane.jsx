@@ -169,7 +169,8 @@ export default function ComposePane() {
       } else {
         await invoke('update_draft', { draft: buildDraftPayload() });
       }
-      await invoke('send_email', { draft_id: dId, account_id: fromAccountId || state.activeAccountId });
+      const accountId = fromAccountId || state.activeAccountId;
+      await invoke('send_email', { draft_id: dId, account_id: accountId });
       toast('Message sent!', 'success');
       closeCompose();
     } catch (err) {
@@ -280,6 +281,7 @@ export default function ComposePane() {
         <div className="compose-window__footer">
           <button
             className="btn btn--primary"
+            data-testid="compose-send-button"
             onClick={handleSend}
             disabled={sending || !can('send')}
             title={!can('send') ? 'Send permission required' : 'Send email'}
@@ -291,6 +293,7 @@ export default function ComposePane() {
           <div style={{ position: 'relative' }}>
             <button
               className="btn btn--secondary"
+              data-testid="compose-schedule-button"
               onClick={() => setScheduleOpen(p => !p)}
               disabled={sending || !can('send')}
               aria-label="Schedule send options"
@@ -309,6 +312,7 @@ export default function ComposePane() {
 
           <button
             className="btn btn--secondary"
+            data-testid="compose-save-draft-button"
             onClick={() => saveDraft()}
             disabled={!can('draft')}
             title={!can('draft') ? 'Draft permission required' : 'Save draft'}

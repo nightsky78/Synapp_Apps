@@ -44,6 +44,8 @@ test.describe('Mail Client packaged UI', () => {
 
   test('TC-SA-MAIL-UI-006: no host bridge renders real mail API account and message responses', async ({ page }) => {
     const apiCalls: string[] = [];
+    const mailboxReads: string[] = [];
+    const sentSubjects: string[] = ['Real sent IMAP message'];
     await page.route('**/api/v1/mail/accounts', async (route) => {
       apiCalls.push(route.request().method() + ' ' + new URL(route.request().url()).pathname);
       await route.fulfill({
@@ -70,29 +72,67 @@ test.describe('Mail Client packaged UI', () => {
         }),
       });
     });
-    await page.route('**/api/v1/mail/messages?**', async (route) => {
+    await page.route('**/api/v1/mail/send', async (route) => {
       apiCalls.push(route.request().method() + ' ' + new URL(route.request().url()).pathname);
+      const requestBody = route.request().postDataJSON() as {
+        subject?: string;
+        to?: string;
+        body_text?: string;
+      };
+      sentSubjects.unshift(requestBody.subject || '(no subject)');
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          message_id: `real-sent-${Date.now()}`,
+          accepted_recipients: requestBody.to ? requestBody.to.split(',').map((email) => email.trim()).filter(Boolean) : [],
+          queued: false,
+        }),
+      });
+    });
+    await page.route('**/api/v1/mail/messages?**', async (route) => {
+      const requestUrl = new URL(route.request().url());
+      const mailbox = (requestUrl.searchParams.get('mailbox') || 'INBOX').toUpperCase();
+      mailboxReads.push(mailbox);
+      apiCalls.push(route.request().method() + ' ' + requestUrl.pathname);
+      const sentMessages = sentSubjects.map((subject, index) => ({
+        id: `real-sent-message-${index + 1}`,
+        uid: String(99 + index),
+        message_id: `<real-sent-message-${index + 1}@example.com>`,
+        account_id: 'real-account-1',
+        mailbox: 'SENT',
+        from: { name: 'Real User', email: 'real@example.com' },
+        to: [{ name: 'Recipient', email: 'recipient@example.com' }],
+        subject,
+        snippet: `This message appears in Sent: ${subject}`,
+        body_text: `This message appears in Sent: ${subject}`,
+        body_html: `<p>This message appears in Sent: ${subject}</p>`,
+        date_iso: '2026-05-14T09:30:00Z',
+        has_attachments: false,
+      }));
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
           account: { account_id: 'real-account-1', account_label: 'Real mailbox', email_address: 'real@example.com', status: 'active' },
-          mailbox: 'INBOX',
-          messages: [{
-            id: 'real-message-1',
-            uid: '42',
-            message_id: '<real-message-1@example.com>',
-            account_id: 'real-account-1',
-            mailbox: 'INBOX',
-            from: { name: 'Real Sender', email: 'sender@example.com' },
-            to: [{ name: 'Real User', email: 'real@example.com' }],
-            subject: 'Real IMAP message',
-            snippet: 'This message came from the platform mail API.',
-            body_text: 'This message came from the platform mail API.',
-            body_html: '<p>This message came from the platform mail API.</p>',
-            date_iso: '2026-05-14T08:30:00Z',
-            has_attachments: false,
-          }],
+          mailbox,
+          messages: mailbox === 'SENT'
+            ? sentMessages
+            : [{
+                id: 'real-message-1',
+                uid: '42',
+                message_id: '<real-message-1@example.com>',
+                account_id: 'real-account-1',
+                mailbox: 'INBOX',
+                from: { name: 'Real Sender', email: 'sender@example.com' },
+                to: [{ name: 'Real User', email: 'real@example.com' }],
+                subject: 'Real IMAP message',
+                snippet: 'This message came from the platform mail API.',
+                body_text: 'This message came from the platform mail API.',
+                body_html: '<p>This message came from the platform mail API.</p>',
+                date_iso: '2026-05-14T08:30:00Z',
+                has_attachments: false,
+              }],
         }),
       });
     });
@@ -104,8 +144,30 @@ test.describe('Mail Client packaged UI', () => {
     await page.getByRole('button', { name: /Email from Real Sender: Real IMAP message/ }).click();
     await expect(page.getByRole('heading', { name: 'Real IMAP message' })).toBeVisible();
     await expect(page.getByLabel('Email content').getByText('This message came from the platform mail API.')).toBeVisible();
+
+    await page.getByTestId('mailbox-button-sent').click();
+    await expect(page.getByTestId('mailbox-button-sent')).toHaveClass(/sidebar__folder--active/);
+    await expect(page.getByRole('button', { name: /Email from Real User: Real sent IMAP message/ })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Compose new email' }).click();
+    const compose = page.getByRole('dialog', { name: 'Compose email' });
+    await compose.getByPlaceholder(/Add recipients/).fill('recipient@example.com');
+    await compose.getByPlaceholder(/Add recipients/).press('Enter');
+    await compose.getByLabel('Subject').fill('Real sent from no-host flow');
+    await compose.getByLabel('Message body').fill('Validating that sent mail appears in Sent mailbox.');
+    await compose.getByTestId('compose-send-button').click();
+    await expect(compose).toHaveCount(0);
+
+    await page.getByTestId('mailbox-button-inbox').click();
+    await expect(page.getByTestId('mailbox-button-inbox')).toHaveClass(/sidebar__folder--active/);
+    await page.getByTestId('mailbox-button-sent').click();
+    await expect(page.getByTestId('mailbox-button-sent')).toHaveClass(/sidebar__folder--active/);
+    await expect(page.getByRole('button', { name: /Email from Real User: Real sent from no-host flow/ })).toBeVisible();
+
     expect(apiCalls).toContain('GET /api/v1/mail/accounts');
     expect(apiCalls).toContain('GET /api/v1/mail/messages');
+    expect(apiCalls).toContain('POST /api/v1/mail/send');
+    expect(mailboxReads).toContain('SENT');
     await expect(page.getByText('Alice Chen')).toHaveCount(0);
   });
 
@@ -157,11 +219,17 @@ test.describe('Mail Client packaged UI', () => {
     await compose.locator('.compose-window__footer').getByRole('button', { name: 'Save draft' }).click();
     await expect(page.getByLabel('Notifications').getByText('Draft saved')).toBeVisible();
 
-    await compose.getByRole('button', { name: 'Send', exact: true }).click();
-    await expect(page.getByText('Message sent!')).toBeVisible();
+    await compose.getByTestId('compose-send-button').click();
     await expect(compose).toHaveCount(0);
+    await page.getByTestId('mailbox-button-sent').click();
+    await expect(page.getByTestId('mailbox-button-sent')).toHaveClass(/sidebar__folder--active/);
+    await expect(page.getByTestId('email-item-sent-draft-ui-001')).toBeVisible();
+    await expect(page.getByRole('button', { name: /Email from Test User: Launch update/ })).toBeVisible();
     await expect(mailCalls(page, 'draft_email')).resolves.toHaveLength(1);
     await expect(mailCalls(page, 'send_email')).resolves.toHaveLength(1);
+    await expect(mailCalls(page, 'read_emails')).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({ payload: expect.objectContaining({ mailbox_id: 'sent' }) }),
+    ]));
 
     await page.getByRole('button', { name: 'Compose new email' }).click();
     const scheduled = page.getByRole('dialog', { name: 'Compose email' });
@@ -239,6 +307,7 @@ test.describe('Mail Client packaged UI', () => {
     await page.getByLabel('Search emails').fill('budget');
     await expect(page.getByText('Search failed: forced search_emails failure')).toBeVisible();
   });
+
 });
 
 async function openMailUi(page: Page, options: HostBridgeOptions = {}) {
@@ -277,6 +346,7 @@ async function openMailUi(page: Page, options: HostBridgeOptions = {}) {
     ];
     const rules = [];
     const calls = [];
+    const draftStore = new Map();
 
     function makeEmail(id, fromEmail, fromName, subject, preview, receivedAt, isRead, hasAttachments, importance) {
       return {
@@ -303,6 +373,35 @@ async function openMailUi(page: Page, options: HostBridgeOptions = {}) {
       };
     }
 
+    function makeSentEmail(payload, draft) {
+      const sentAt = Math.floor(Date.now() / 1000);
+      const account = accounts.find((item) => item.account_id === (payload.account_id || draft.account_id)) || accounts[0] || {};
+      const subject = draft.subject || '(no subject)';
+      const preview = draft.body_text || draft.body_html || '';
+      return {
+        email_id: `sent-${payload.draft_id || sentAt}`,
+        account_id: payload.account_id || draft.account_id || 'acc-1',
+        mailbox_id: 'sent',
+        thread_id: `thread-${payload.draft_id || sentAt}`,
+        from: { email: account.email_address || 'test@example.com', display_name: account.display_name || account.account_label || 'Test User' },
+        to: (draft.to || []).map((recipient) => ({ email: recipient.email || recipient, display_name: recipient.display_name || recipient.email || recipient })),
+        cc: (draft.cc || []).map((recipient) => ({ email: recipient.email || recipient, display_name: recipient.display_name || recipient.email || recipient })),
+        bcc: (draft.bcc || []).map((recipient) => ({ email: recipient.email || recipient, display_name: recipient.display_name || recipient.email || recipient })),
+        subject,
+        preview,
+        body_html: draft.body_html || `<p>${preview}</p>`,
+        body_text: draft.body_text || preview,
+        received_at: sentAt,
+        sent_at: sentAt,
+        is_read: true,
+        is_flagged: false,
+        has_attachments: Boolean(draft.attachments?.length),
+        importance: draft.importance || 'normal',
+        categories: [],
+        attachments: draft.attachments || [],
+      };
+    }
+
     function ok(operation, data) {
       return { ok: { operation, status: 'accepted', data, host_effects: [], warnings: [] } };
     }
@@ -314,7 +413,12 @@ async function openMailUi(page: Page, options: HostBridgeOptions = {}) {
 
     function failIfForced(operation) {
       if (!failures.has(operation)) return null;
-      return { err: { code: 'ForcedFailure', message: `forced ${operation} failure` } };
+      return {
+        err: {
+          code: 'ForcedFailure',
+          message: `forced ${operation} failure`,
+        },
+      };
     }
 
     window.__mailCalls = calls;
@@ -351,13 +455,29 @@ async function openMailUi(page: Page, options: HostBridgeOptions = {}) {
             return ok(operation, { mutation: 'archive_email', resource_ids: payload.email_ids ?? [], applied: true });
           case 'delete_email':
             return ok(operation, { mutation: 'delete_email', resource_ids: payload.email_ids ?? [], applied: true });
-          case 'draft_email':
-            return ok(operation, { draft: payload.draft, suggested_draft_id: 'draft-ui-001' });
-          case 'update_draft':
-            return ok(operation, { draft: payload.draft, suggested_draft_id: payload.draft?.draft_id ?? 'draft-ui-001' });
-          case 'send_email': return ok(operation, { draft_id: payload.draft_id, account_id: payload.account_id, undo_window_seconds: 10, notify: true });
+          case 'draft_email': {
+            const draftId = payload.draft?.draft_id || 'draft-ui-001';
+            const draft = { ...payload.draft, draft_id: draftId };
+            draftStore.set(draftId, draft);
+            return ok(operation, { draft, suggested_draft_id: draftId });
+          }
+          case 'update_draft': {
+            const draftId = payload.draft?.draft_id || 'draft-ui-001';
+            const draft = { ...payload.draft, draft_id: draftId };
+            draftStore.set(draftId, draft);
+            return ok(operation, { draft, suggested_draft_id: draftId });
+          }
+          case 'send_email': {
+            const draft = draftStore.get(payload.draft_id) || payload.draft || payload;
+            const sentMessage = makeSentEmail(payload, draft);
+            emails.unshift(sentMessage);
+            draftStore.delete(payload.draft_id);
+            return ok(operation, { draft_id: payload.draft_id, account_id: payload.account_id, undo_window_seconds: 10, notify: true, message_id: sentMessage.email_id });
+          }
           case 'schedule_send': return ok(operation, { job_id: 'job-ui-001', draft_id: payload.draft_id, account_id: payload.account_id, scheduled_for: payload.scheduled_for });
-          case 'discard_draft': return ok(operation, { mutation: 'discard_draft', resource_ids: [payload.draft_id], applied: true });
+          case 'discard_draft':
+            draftStore.delete(payload.draft_id);
+            return ok(operation, { mutation: 'discard_draft', resource_ids: [payload.draft_id], applied: true });
           case 'get_provider_capabilities': return ok(operation, { providers: [], manual_imap_smtp: { enabled: true }, policy: { allow_receive_only: true } });
           case 'validate_account_setup': return ok(operation, { valid: true, normalized_account: payload.account, field_errors: [], warnings: [], next_required_action: 'test_connection' });
           case 'plan_connection_test': return ok(operation, { account_id: 'acc-new', test_id: 'test-ui-001', requires_host_execution: true, steps: ['imap_auth', 'imap_mailbox_discovery', 'smtp_auth', 'smtp_send_capability', 'folder_mapping'] });

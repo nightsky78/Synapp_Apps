@@ -3231,6 +3231,32 @@ mod tests {
     }
 
     #[test]
+    fn limited_event_projection_strips_private_content() {
+        let mut event = base_event();
+        event["title"] = json!("Private acquisition review");
+        event["location"] = json!("Board room");
+        event["body_text"] = json!("Sensitive agenda");
+        event["body_html"] = json!("<p>Sensitive agenda</p>");
+        event["attendees"] = json!([{ "email": "ceo@example.com", "kind": "required" }]);
+        event["organizer"] = json!({ "email": "founder@example.com" });
+        event["categories"] = json!(["cat_secret"]);
+
+        let mut request = success_request("list_events");
+        request["snapshot"] = json!([event]);
+        request["projection"] = json!("limited");
+
+        let response = call("list_events", request);
+        let projected = response.pointer("/ok/data/events/0").unwrap();
+        assert_eq!(projected.get("title").and_then(Value::as_str), Some("Busy"));
+        assert!(projected.get("location").is_none(), "limited projection must hide location: {projected}");
+        assert!(projected.get("body_text").is_none(), "limited projection must hide notes: {projected}");
+        assert!(projected.get("body_html").is_none(), "limited projection must hide HTML body: {projected}");
+        assert!(projected.get("attendees").is_none(), "limited projection must hide attendees: {projected}");
+        assert!(projected.get("organizer").is_none(), "limited projection must hide organizer: {projected}");
+        assert!(projected.get("categories").is_none(), "limited projection must hide categories: {projected}");
+    }
+
+    #[test]
     fn host_effect_plans_include_stable_idempotency_keys() {
         let response = call("create_event", success_request("create_event"));
         let effects = response

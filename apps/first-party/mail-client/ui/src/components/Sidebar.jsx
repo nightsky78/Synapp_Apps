@@ -22,6 +22,7 @@ export default function Sidebar() {
     return (
       <button
         className={`sidebar__folder${active ? ' sidebar__folder--active' : ''}`}
+        data-testid={`mailbox-button-${mailbox.mailbox_id}`}
         onClick={() => dispatch({ type: 'SET_ACTIVE_MAILBOX', payload: mailbox.mailbox_id })}
         title={mailbox.name}
         aria-current={active ? 'page' : undefined}
@@ -118,7 +119,7 @@ export default function Sidebar() {
       {can('organize') && (
         <>
           <div className="sidebar__divider" />
-          <button className="sidebar__action" onClick={() => dispatch({ type: 'SET_SHOW_FOLDER_MANAGER', payload: true })}>
+          <button className="sidebar__action" data-testid="new-folder-button" onClick={() => dispatch({ type: 'SET_SHOW_FOLDER_MANAGER', payload: true })}>
             New folder
           </button>
         </>

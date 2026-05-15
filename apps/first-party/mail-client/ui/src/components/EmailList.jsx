@@ -19,6 +19,7 @@ function EmailItem({ email, active, selected, onSelect, onFlag, onToggleSelected
   return (
     <article
       className={`email-item${!email.is_read ? ' email-item--unread' : ''}${active ? ' email-item--active' : ''}`}
+      data-testid={`email-item-${email.email_id}`}
       onClick={() => onSelect(email)}
       role="button"
       tabIndex={0}
@@ -54,6 +55,7 @@ function EmailItem({ email, active, selected, onSelect, onFlag, onToggleSelected
       </div>
       <button
         className={`email-item__flag-btn${email.is_flagged ? ' email-item__flag-btn--active' : ''}`}
+        data-testid={`email-flag-button-${email.email_id}`}
         title={email.is_flagged ? 'Remove flag' : 'Flag email'}
         aria-label={email.is_flagged ? 'Remove flag' : 'Flag email'}
         onClick={e => { e.stopPropagation(); onFlag(email.email_id); }}

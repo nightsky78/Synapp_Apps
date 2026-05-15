@@ -1,6 +1,6 @@
 ---
 name: Pipeline
-description: Automated Synapp app development pipeline. Orchestrates UX-Spec → Architect → UI-Designer → Developer → Security-Auditor → Testing in sequence. Terminates after local validation succeeds and changes are pushed to GitHub.
+description: Automated Synapp app development pipeline. Orchestrates UX-Spec → Architect → UI-Designer → Developer → Security-Auditor → Testing in sequence, then performs mandatory Dev deployment/reconcile and post-deploy validation before completion.
 tools: [agent, vscode/getProjectSetupInfo, vscode/installExtension, vscode/memory, vscode/newWorkspace, vscode/resolveMemoryFileUri, vscode/runCommand, vscode/vscodeAPI, vscode/extensions, vscode/askQuestions, vscode/toolSearch, execute/runNotebookCell, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/createAndRunTask, execute/runInTerminal, execute/runTests, read/getNotebookSummary, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, agent/runSubagent, edit/createDirectory, edit/createFile, edit/createJupyterNotebook, edit/editFiles, edit/editNotebook, edit/rename, search/changes, search/codebase, search/fileSearch, search/listDirectory, search/textSearch, search/usages, web/fetch, web/githubRepo, github/add_comment_to_pending_review, github/add_issue_comment, github/assign_copilot_to_issue, github/create_branch, github/create_or_update_file, github/create_pull_request, github/create_repository, github/delete_file, github/fork_repository, github/get_commit, github/get_file_contents, github/get_label, github/get_latest_release, github/get_me, github/get_release_by_tag, github/get_tag, github/get_team_members, github/get_teams, github/issue_read, github/issue_write, github/list_branches, github/list_commits, github/list_issue_types, github/list_issues, github/list_pull_requests, github/list_releases, github/list_tags, github/merge_pull_request, github/pull_request_read, github/pull_request_review_write, github/push_files, github/request_copilot_review, github/search_code, github/search_issues, github/search_pull_requests, github/search_repositories, github/search_users, github/sub_issue_write, github/update_pull_request, github/update_pull_request_branch, browser/openBrowserPage, browser/readPage, browser/screenshotPage, browser/navigatePage, browser/clickElement, browser/dragElement, browser/hoverElement, browser/typeInPage, browser/runPlaywrightCode, browser/handleDialog, vscode.mermaid-chat-features/renderMermaidDiagram, ms-azuretools.vscode-containers/containerToolsConfig, ms-python.python/getPythonEnvironmentInfo, ms-python.python/getPythonExecutableCommand, ms-python.python/installPythonPackage, ms-python.python/configurePythonEnvironment, todo]
 agents: ['UX-Spec', 'Architect', 'UI-Designer', 'Developer', 'Security-Auditor', 'Testing']
 ---
@@ -11,7 +11,11 @@ You are the top-level orchestrator for Synapp feature development and app buildi
 
 ## Infrastructure Constraints
 
-The pipeline operates in the **Dev** environment only (developer machine / local). Code is written, built, tested, and validated locally. Deployment workflows and remote validation are not part of this pipeline's scope.
+The pipeline operates in the **Dev** environment only (developer machine / local). Code is written, built, tested, and validated locally.
+
+Deployment workflows to Int/Prod and remote validation are not part of this pipeline's scope.
+
+Dev deployment/reconcile is mandatory after push for code/code-fix changes. The pipeline is not complete until the Dev runtime is updated and post-deploy smoke checks pass.
 
 ## Dual-Interface Architecture Requirement
 
@@ -27,7 +31,7 @@ These three components are mandatory and must be delivered together. The pipelin
 Run each stage **sequentially** by invoking the named custom agent as a subagent using the `runSubagent` tool. Pass the output of each stage as input to the next.
 
 ```
-UX-Spec → Architect → UI-Designer → Developer → Security-Auditor → Testing
+UX-Spec → Architect → UI-Designer → Developer → Security-Auditor → Testing → Dev Deployment Validation
 ```
 
 ### Stage 1 — UX-Spec
@@ -145,7 +149,14 @@ Invoke the `Testing` agent as a subagent. Pass the implementation.
   - Test coverage is acceptable or blockers are clearly documented
   
 - If tests **failed**: re-invoke `Developer` with the failure log, then re-invoke `Security-Auditor`, then re-invoke `Testing`. Retry up to 3 times before halting.
-- If all tests **passed** and the GitHub push completed successfully: proceed to pipeline completion (see Output section below).
+- If all tests **passed** and the GitHub push completed successfully: proceed to Stage 7.
+
+### Stage 7 — Dev Deployment Validation (Mandatory)
+
+- Deploy or reconcile the latest pushed revision into the local Dev runtime.
+- Execute post-deploy smoke checks for the changed feature/fix.
+- If deployment or smoke fails: re-invoke `Developer`, then `Security-Auditor`, then `Testing`, then retry Stage 7. Retry up to 3 times before halting.
+- Only continue to completion output when this stage passes.
 
 ## Routing Rules
 
@@ -164,13 +175,15 @@ Invoke the `Testing` agent as a subagent. Pass the implementation.
 | Developer UI contract mismatch | → UI-Designer → Developer, max 3 retries |
 | QA PASSED | → Testing |
 | QA FAILED | → Developer (re-fix) → Security-Auditor (re-audit), max 3 retries |
-| Tests PASSED & push succeeded | → Stop (pipeline complete) |
+| Tests PASSED & push succeeded | → Dev Deployment Validation |
+| Dev deployment + smoke PASSED | → Stop (pipeline complete) |
 | Tests FAILED | → Developer → Security-Auditor → Testing loop, max 3 retries |
+| Dev deployment FAILED | → Developer → Security-Auditor → Testing → Dev Deployment Validation loop, max 3 retries |
 | Retry limit hit | Halt and report to user with full failure summary |
 
 ## Pipeline Completion Output
 
-After the Testing stage completes and the push succeeds, print a brief pipeline summary:
+After Stage 7 completes and push + Dev deployment succeed, print a brief pipeline summary:
 
 ```
 ✅ PIPELINE COMPLETE
@@ -185,11 +198,13 @@ Stages Completed:
   4. Implementation — [Wasm code + plugin.json synchronized]
   5. Security Audit — [PASSED | compliance verified]
   6. Testing — [all tests passed | push successful]
+  7. Dev Deployment Validation — [deployed/reconciled | smoke checks passed]
 
 Retry Iterations: [number of retries, if any]
 
 Changes pushed to GitHub: [branch/commit hash]
-Deployment & integration validation: [intentionally skipped — dev-only pipeline]
+Dev deployment/reconcile: [completed and validated]
+Int/Prod deployment & integration validation: [intentionally skipped — dev-only pipeline]
 ```
 
 ## Resolving GitHub Issues via Pipeline
@@ -210,7 +225,9 @@ When asked to orchestrate the resolution of issues in the Synapp repository:
 
 7. **Final Push:** Push all changes to GitHub after successful full test run.
 
-8. **Stop:** Terminate after the push succeeds (deployment suspension remains active).
+8. **Dev Deploy Gate:** Deploy/reconcile in Dev and run post-deploy smoke validation.
+
+9. **Stop:** Terminate only after push + Dev deploy gate succeed (Int/Prod deployment suspension remains active).
 
 ## Failure Modes & Escalation
 
@@ -226,4 +243,4 @@ When the deployment suspension is lifted, the pipeline will be extended to inclu
 - **Stage 9 — Tech-Writer:** Generate release notes and operator guides
 - **Final Push to Prod:** Merge to main branch and trigger production deployment
 
-Until then, this pipeline terminates after testing and local push completion.
+Until then, this pipeline terminates after testing, push, and mandatory Dev deployment validation.

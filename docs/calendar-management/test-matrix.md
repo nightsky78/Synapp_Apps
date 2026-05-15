@@ -1,9 +1,9 @@
 # Calendar Management Test Matrix
 
-Stage: 6 - Testing  
+Stage: Apps Testing
 App: `apps/first-party/calendar-management`  
-Date: 2026-05-08  
-Verdict: PASS, with documented release risks
+Date: 2026-05-14
+Verdict: Playwright platform coverage expanded for supportable lifecycle surfaces; full live calendar workflows remain blocked by platform renderer/host-effect gaps.
 
 ## Scope
 
@@ -16,6 +16,20 @@ This matrix validates the first-party `calendar-management` Synapp app across th
 - `plugin.json`, `synapp.app.json`, and Rust export-name alignment.
 - VS Code diagnostics for the new app and docs.
 - Residual release risks and push gate status.
+
+## App-Platform E2E Strategy
+
+Current platform validation must stay at the generic app-platform contract boundary. `calendar-management` ships package/catalog metadata for app id `calendar-management`, version `0.1.0`, required `calendar:read`, and optional calendar capabilities. Its UI metadata still uses legacy `ui.entrypoint` plus `ui.contributions` with `CalendarWorkspace`; it does not expose canonical `ui_schemas.main`, and the live platform does not yet provide a real `CalendarWorkspace` renderer or custom calendar host effects.
+
+Supportable Playwright coverage today is therefore:
+
+- Catalog visibility for Calendar Management, including version, summary, and metadata-only verification mapping to unavailable.
+- Install, uninstall, reinstall, enabled navigation state, and installed row behavior.
+- Capability review and grant persistence for required `calendar:read` plus optional `calendar:write` and `calendar:settings`.
+- Required grant immutability: `calendar:read` cannot be removed from grant updates.
+- UI-schema/app route smoke that accepts a rendered app shell or structured disabled/not-installed/unsupported recovery state, but does not assert event creation, invitations, scheduling, reminders, offline sync, sharing, delegates, or audit workflows.
+
+Full end-to-end calendar event, invite, scheduling, reminder, offline, sharing/delegate, and audit workflows require a platform escalation: canonical calendar UI schema support or a safe legacy renderer, plus generic host effects that cover the calendar domain without embedding app-specific logic in the host.
 
 ## Command Results
 

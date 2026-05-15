@@ -29,17 +29,18 @@ export default function FolderManager() {
   const customFolders = state.mailboxes.filter(m => m.kind === 'custom');
 
   return (
-    <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="Manage folders" onClick={e => e.target === e.currentTarget && close()}>
+    <div className="modal-overlay" data-testid="folder-manager-dialog" role="dialog" aria-modal="true" aria-label="Manage folders" onClick={e => e.target === e.currentTarget && close()}>
       <div className="modal">
         <div className="modal__header">
           <span className="modal__title">Manage Folders</span>
-          <button className="modal__close" onClick={close} aria-label="Close">×</button>
+          <button className="modal__close" data-testid="folder-manager-close" onClick={close} aria-label="Close">×</button>
         </div>
         <div className="modal__body">
           <div className="form-group">
             <label className="form-label" htmlFor="new-folder-name">New Folder Name</label>
             <input
               id="new-folder-name"
+              data-testid="new-folder-name"
               className="form-input"
               type="text"
               value={name}
@@ -55,7 +56,7 @@ export default function FolderManager() {
               <div className="form-label" style={{ marginBottom: 6 }}>Your Folders</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 200, overflowY: 'auto' }}>
                 {customFolders.map(m => (
-                  <div key={m.mailbox_id} style={{ display: 'flex', alignItems: 'center', padding: '6px 8px', border: '1px solid #e0e0e0', borderRadius: 4, fontSize: 13 }}>
+                  <div key={m.mailbox_id} data-testid={`folder-manager-folder-${m.mailbox_id}`} style={{ display: 'flex', alignItems: 'center', padding: '6px 8px', border: '1px solid #e0e0e0', borderRadius: 4, fontSize: 13 }}>
                     <span style={{ flex: 1 }}>📁 {m.name}</span>
                     <span style={{ fontSize: 11, color: '#a19f9d', marginRight: 8 }}>{m.total_count} messages</span>
                     <button
@@ -82,7 +83,7 @@ export default function FolderManager() {
         </div>
         <div className="modal__footer">
           <button className="btn btn--secondary" onClick={close}>Cancel</button>
-          <button className="btn btn--primary" onClick={handleCreate} disabled={creating || !name.trim()}>
+          <button className="btn btn--primary" data-testid="create-folder-button" onClick={handleCreate} disabled={creating || !name.trim()}>
             {creating ? 'Creating…' : 'Create Folder'}
           </button>
         </div>
