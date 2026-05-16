@@ -20,7 +20,7 @@
   "source": {
     "repository": "https://github.com/nightsky78/Synapp_Apps/",
     "directory": "apps/first-party/calendar-management",
-    "commit": "11b880a5ef882c65b17385a0a4622ef0fd233959"
+    "commit": "f96df197129a3aa7f5cc680a1bfc1f41d957989b"
   },
   "manifest": {
     "$schema": "../../../catalog/schemas/package-manifest.schema.json",
