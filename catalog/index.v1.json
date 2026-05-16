@@ -10,6 +10,13 @@
       "publisher": "Synapp"
     },
     {
+      "app_id": "contacts-management",
+      "catalog_entry": "catalog/apps/contacts-management.v1.json",
+      "latest_version": "0.1.0",
+      "channel": "stable",
+      "publisher": "Synapp"
+    },
+    {
       "app_id": "dummy-plugin",
       "catalog_entry": "catalog/apps/dummy-plugin.v1.json",
       "latest_version": "0.1.0",

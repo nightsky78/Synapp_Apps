@@ -49,6 +49,8 @@ authenticated JWT — **your code can never forge those values**.
 | **[02-building-your-first-app.md](02-building-your-first-app.md)** | A complete, runnable step-by-step tutorial. You will have a working app at the end. |
 | **[03-capabilities-reference.md](03-capabilities-reference.md)** | Every `HostEffect`, the settings schema, the semantic tool manifest, and the HTTP API surface — all in full detail with examples. |
 | **[04-security-and-testing.md](04-security-and-testing.md)** | Mandatory security checklist and how to write and run tests for your app. |
+| **[05-contacts-app-ux-spec.md](05-contacts-app-ux-spec.md)** | UX spec for the three-pane Contacts workspace, state model, journeys, accessibility, and platform dependency notes. |
+| **[06-contacts-app-architecture.md](06-contacts-app-architecture.md)** | Architecture contract for `contacts-app`: action surface, collections, UI schema boundaries, testing strategy, and escalation dependencies. |
 
 ---
 

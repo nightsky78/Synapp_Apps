@@ -1,0 +1,157 @@
+{
+  "name": "ContactsManagement",
+  "version": "0.1.0",
+  "description": "Synapp contacts-management Wasm module with pure action handlers and host-managed persistence.",
+  "executionInterface": {
+    "wasmTarget": "wasm32-wasip1",
+    "wasmPath": "target/wasm32-wasip1/release/contacts_management.wasm",
+    "memoryManagement": {
+      "returnedStringsAreNullTerminated": true,
+      "deallocatorExport": "free_string",
+      "inputEncoding": "utf-8-json"
+    },
+    "exports": [
+      {
+        "name": "contacts.list",
+        "description": "List contacts visible to the current principal.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "group_id": { "type": ["string", "null"] },
+            "query": { "type": ["string", "null"] },
+            "limit": { "type": "integer", "minimum": 1, "maximum": 500 }
+          }
+        },
+        "outputSchema": { "type": "object" }
+      },
+      {
+        "name": "contacts.create",
+        "description": "Create a new caller-scoped contact.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "contact": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "display_name": { "type": "string", "minLength": 1, "maxLength": 200 },
+                "email": { "type": ["string", "null"], "maxLength": 320 },
+                "phone": { "type": ["string", "null"], "maxLength": 64 },
+                "company": { "type": ["string", "null"], "maxLength": 200 },
+                "title": { "type": ["string", "null"], "maxLength": 200 },
+                "group_id": { "type": ["string", "null"], "maxLength": 128 },
+                "notes": { "type": ["string", "null"], "maxLength": 2000 },
+                "favorite": { "type": "boolean" },
+                "tags": { "type": "array", "items": { "type": "string", "maxLength": 64 }, "maxItems": 20 }
+              },
+              "required": ["display_name"]
+            }
+          },
+          "required": ["contact"]
+        },
+        "outputSchema": { "type": "object" }
+      },
+      {
+        "name": "contacts.update",
+        "description": "Update a caller-scoped contact.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "contact_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "contact": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "display_name": { "type": "string", "minLength": 1, "maxLength": 200 },
+                "email": { "type": ["string", "null"], "maxLength": 320 },
+                "phone": { "type": ["string", "null"], "maxLength": 64 },
+                "company": { "type": ["string", "null"], "maxLength": 200 },
+                "title": { "type": ["string", "null"], "maxLength": 200 },
+                "group_id": { "type": ["string", "null"], "maxLength": 128 },
+                "notes": { "type": ["string", "null"], "maxLength": 2000 },
+                "favorite": { "type": "boolean" },
+                "tags": { "type": "array", "items": { "type": "string", "maxLength": 64 }, "maxItems": 20 }
+              },
+              "required": ["display_name"]
+            },
+            "revision": { "type": ["string", "null"], "maxLength": 128 }
+          },
+          "required": ["contact_id", "contact"]
+        },
+        "outputSchema": { "type": "object" }
+      },
+      {
+        "name": "contacts.delete",
+        "description": "Soft-delete a caller-scoped contact.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "contact_id": { "type": "string", "minLength": 1, "maxLength": 128 }
+          },
+          "required": ["contact_id"]
+        },
+        "outputSchema": { "type": "object" }
+      },
+      {
+        "name": "contacts.sync-directory",
+        "description": "Plan syncing the caller's organization directory; returns a blocked state when the platform enumeration contract is unavailable.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "directory_scope": { "type": ["string", "null"], "maxLength": 128 },
+            "limit": { "type": "integer", "minimum": 1, "maximum": 500 }
+          }
+        },
+        "outputSchema": { "type": "object" }
+      }
+    ]
+  },
+  "semanticInterface": {
+    "tools": [
+      {
+        "name": "contacts.list",
+        "description": "List contacts visible to the current principal.",
+        "category": "query",
+        "capability": "contacts:read",
+        "risk": "medium"
+      },
+      {
+        "name": "contacts.create",
+        "description": "Create a contact in the caller's principal namespace.",
+        "category": "mutation",
+        "capability": "contacts:write",
+        "risk": "high"
+      },
+      {
+        "name": "contacts.update",
+        "description": "Update a contact in the caller's principal namespace.",
+        "category": "mutation",
+        "capability": "contacts:write",
+        "risk": "high"
+      },
+      {
+        "name": "contacts.delete",
+        "description": "Soft-delete a contact in the caller's principal namespace.",
+        "category": "mutation",
+        "capability": "contacts:write",
+        "risk": "high"
+      },
+      {
+        "name": "contacts.sync-directory",
+        "description": "Plan directory synchronization. This app currently returns a blocked state until the platform user enumeration contract is available.",
+        "category": "mutation-plan",
+        "capability": "contacts:read",
+        "risk": "medium"
+      }
+    ]
+  },
+  "hostEffects": {
+    "required": ["PutDocument", "QueryDocuments"],
+    "notes": "Contacts actions are pure planners. The Wasm module never performs host I/O itself; it returns document-store effect plans that the host executes using the validated principal namespace."
+  }
+}

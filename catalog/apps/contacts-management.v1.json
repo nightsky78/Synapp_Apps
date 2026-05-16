@@ -1,0 +1,228 @@
+{
+  "schema_version": "1.0.0",
+  "app_id": "contacts-management",
+  "name": "Contacts Management",
+  "summary": "Three-pane Synapp contacts workspace with a schema-driven UI shell.",
+  "description": "First-party Synapp contacts app scaffold. The packaged UI presents a three-pane contacts workspace for groups, people, and details. The manifest keeps the contract schema-driven, avoids raw DOM/script injection, and reserves persistence and identity operations for host services.",
+  "version": "0.1.0",
+  "publisher": "Synapp",
+  "category": "productivity",
+  "repository_url": "https://github.com/nightsky78/Synapp_Apps/",
+  "package_url": "https://github.com/nightsky78/Synapp_Apps/releases/download/contacts-management-v0.1.0/contacts-management-0.1.0.tar.gz",
+  "package_sha256": "0a1c58f35539fefbbc13de8f182f8d6ce5dcb589f3de7b5d5eb2ea14b31eb6ac",
+  "manifest_sha256": "8b8d6dac20d5e8b9dbc8344f8fbcd892b2d93cc695a2a01118d424117700217d",
+  "signature": {
+    "type": "metadata-only",
+    "signer": "synapp-dev-catalog",
+    "value": "metadata-only:contacts-management:0.1.0",
+    "verification_status": "metadata_verified"
+  },
+  "source": {
+    "repository": "https://github.com/nightsky78/Synapp_Apps/",
+    "directory": "apps/first-party/contacts-management",
+    "commit": "c97b81b6070264d319bb2a6cff146b5f325ef4b1"
+  },
+  "manifest": {
+    "$schema": "../../../catalog/schemas/package-manifest.schema.json",
+    "schema_version": "1.0.0",
+    "app_id": "contacts-management",
+    "name": "Contacts Management",
+    "version": "0.1.0",
+    "summary": "Three-pane Synapp contacts workspace with a schema-driven UI shell.",
+    "description": "First-party Synapp contacts app scaffold. The packaged UI presents a three-pane contacts workspace for groups, people, and details. The manifest keeps the contract schema-driven, avoids raw DOM/script injection, and reserves persistence and identity operations for host services.",
+    "publisher": {
+      "id": "synapp",
+      "name": "Synapp"
+    },
+    "runtime": "wasm32-wasip1",
+    "platform_api": "v1",
+    "entrypoint": "target/wasm32-wasip1/release/contacts_management.wasm",
+    "capabilities": [
+      {
+        "capability": "contacts:read",
+        "label": "Read contacts",
+        "description": "Read caller-scoped contacts, groups, labels, avatars, and workspace projections.",
+        "required": true,
+        "risk": "high"
+      },
+      {
+        "capability": "contacts:write",
+        "label": "Change contacts",
+        "description": "Create, update, merge, and delete contacts and group assignments through host effects.",
+        "required": true,
+        "risk": "high"
+      },
+      {
+        "capability": "contacts:import",
+        "label": "Import contacts",
+        "description": "Import contact sources from host-managed files or structured payloads.",
+        "required": false,
+        "risk": "medium"
+      },
+      {
+        "capability": "contacts:share",
+        "label": "Share contacts",
+        "description": "Manage shared address books, delegated visibility, and access grants.",
+        "required": false,
+        "risk": "high"
+      },
+      {
+        "capability": "contacts:settings",
+        "label": "Manage contacts settings",
+        "description": "Read and save contacts workspace preferences, sort order, density, and display options.",
+        "required": false,
+        "risk": "medium"
+      },
+      {
+        "capability": "contacts:audit",
+        "label": "Read contacts activity",
+        "description": "Read sanitized activity projections for contacts operations.",
+        "required": false,
+        "risk": "high"
+      }
+    ],
+    "tools": [
+      {
+        "name": "contacts.list",
+        "description": "List contacts visible to the current principal.",
+        "input_schema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "group_id": { "type": ["string", "null"] },
+            "query": { "type": ["string", "null"] },
+            "limit": { "type": "integer", "minimum": 1, "maximum": 500 }
+          }
+        },
+        "output_schema": { "type": "object" }
+      },
+      {
+        "name": "contacts.create",
+        "description": "Create a new caller-scoped contact.",
+        "input_schema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "contact": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "display_name": { "type": "string", "minLength": 1, "maxLength": 200 },
+                "email": { "type": ["string", "null"], "maxLength": 320 },
+                "phone": { "type": ["string", "null"], "maxLength": 64 },
+                "company": { "type": ["string", "null"], "maxLength": 200 },
+                "title": { "type": ["string", "null"], "maxLength": 200 },
+                "group_id": { "type": ["string", "null"], "maxLength": 128 },
+                "notes": { "type": ["string", "null"], "maxLength": 2000 },
+                "favorite": { "type": "boolean" },
+                "tags": { "type": "array", "items": { "type": "string", "maxLength": 64 }, "maxItems": 20 }
+              },
+              "required": ["display_name"]
+            }
+          },
+          "required": ["contact"]
+        },
+        "output_schema": { "type": "object" }
+      },
+      {
+        "name": "contacts.update",
+        "description": "Update a caller-scoped contact.",
+        "input_schema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "contact_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "contact": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "display_name": { "type": "string", "minLength": 1, "maxLength": 200 },
+                "email": { "type": ["string", "null"], "maxLength": 320 },
+                "phone": { "type": ["string", "null"], "maxLength": 64 },
+                "company": { "type": ["string", "null"], "maxLength": 200 },
+                "title": { "type": ["string", "null"], "maxLength": 200 },
+                "group_id": { "type": ["string", "null"], "maxLength": 128 },
+                "notes": { "type": ["string", "null"], "maxLength": 2000 },
+                "favorite": { "type": "boolean" },
+                "tags": { "type": "array", "items": { "type": "string", "maxLength": 64 }, "maxItems": 20 }
+              },
+              "required": ["display_name"]
+            },
+            "revision": { "type": ["string", "null"], "maxLength": 128 }
+          },
+          "required": ["contact_id", "contact"]
+        },
+        "output_schema": { "type": "object" }
+      },
+      {
+        "name": "contacts.delete",
+        "description": "Soft-delete a caller-scoped contact.",
+        "input_schema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "contact_id": { "type": "string", "minLength": 1, "maxLength": 128 }
+          },
+          "required": ["contact_id"]
+        },
+        "output_schema": { "type": "object" }
+      },
+      {
+        "name": "contacts.sync-directory",
+        "description": "Plan syncing the caller's organization directory; returns a blocked state when the platform enumeration contract is unavailable.",
+        "input_schema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "directory_scope": { "type": ["string", "null"], "maxLength": 128 },
+            "limit": { "type": "integer", "minimum": 1, "maximum": 500 }
+          }
+        },
+        "output_schema": { "type": "object" }
+      }
+    ],
+    "ui": {
+      "entrypoint": "ui/dist/index.html",
+      "contributions": [
+        {
+          "type": "navigation_item",
+          "id": "contacts-management.nav",
+          "label": "Contacts",
+          "target": "app://contacts-management/contacts",
+          "page_layout_schema": {
+            "layout": "workspace",
+            "components": [
+              {
+                "type": "ContactsWorkspace",
+                "id": "contacts-management.workspace",
+                "variant": "three-pane",
+                "required_capabilities": ["contacts:read"],
+                "optional_capabilities": ["contacts:write", "contacts:import", "contacts:share", "contacts:settings", "contacts:audit"]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "ui_schemas": {
+      "main": {
+        "schema_type": "page_layout_schema",
+        "page_layout_schema": {
+          "layout": "workspace",
+          "components": [
+            {
+              "kind": "contacts.workspace.v1",
+              "id": "contacts.workspace",
+              "initial_view": "people",
+              "supported_views": ["people", "groups", "details"]
+            }
+          ]
+        }
+      }
+    },
+    "resource_limits": {
+      "memory_bytes": 67108864,
+      "timeout_ms": 4000
+    }
+  }
+}
