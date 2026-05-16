@@ -292,6 +292,25 @@ function hashString(value) {
   return Math.abs(hash).toString(36);
 }
 
+function deterministicUuid(value) {
+  const hashes = [0x811c9dc5, 0x45d9f3b, 0x9e3779b9, 0x27d4eb2d];
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    for (let part = 0; part < hashes.length; part += 1) {
+      hashes[part] = Math.imul(hashes[part] ^ (code + part), 16777619) >>> 0;
+    }
+  }
+  const hex = hashes.map((part) => part.toString(16).padStart(8, '0')).join('').split('');
+  hex[12] = '5';
+  hex[16] = ((parseInt(hex[16], 16) & 0x3) | 0x8).toString(16);
+  const joined = hex.join('');
+  return `${joined.slice(0, 8)}-${joined.slice(8, 12)}-${joined.slice(12, 16)}-${joined.slice(16, 20)}-${joined.slice(20, 32)}`;
+}
+
+function platformDocumentId(collection, stableId) {
+  return deterministicUuid(`${APP_ID}:${collection}:${stableId}`);
+}
+
 function mailStoreKey() {
   const token = getAccessToken();
   const identity = token ? `token-${hashString(token)}` : REST_CONTEXT.user_id;
@@ -379,13 +398,16 @@ async function writePersistentMailStore(store, accountId) {
   if (!hasPlatformDocumentStore()) return;
   const writes = [];
   for (const mailbox of Object.values(store.mailboxes)) {
-    if (mailbox.account_id === accountId) writes.push(putPlatformDocument('mailboxes', `${accountId}:${mailbox.mailbox_id}`, mailbox));
+    if (mailbox.account_id === accountId) writes.push(putPlatformDocument('mailboxes', platformDocumentId('mailboxes', `${accountId}:${mailbox.mailbox_id}`), mailbox));
   }
   for (const message of Object.values(store.messages)) {
-    if (message.account_id === accountId) writes.push(putPlatformDocument('messages', `${accountId}:${message.email_id}`, message));
+    if (message.account_id === accountId) writes.push(putPlatformDocument('messages', platformDocumentId('messages', `${accountId}:${message.email_id}`), message));
   }
   for (const operation of store.operations) {
-    if (operation.account_id === accountId) writes.push(putPlatformDocument('mail_operations', operation.operation_id || `${operation.account_id}:${operation.created_at}:${operation.destination_mailbox_id}`, operation));
+    if (operation.account_id === accountId) {
+      const stableId = operation.operation_id || `${operation.account_id}:${operation.created_at}:${operation.destination_mailbox_id}`;
+      writes.push(putPlatformDocument('mail_operations', platformDocumentId('mail_operations', stableId), operation));
+    }
   }
   await Promise.all(writes);
 }

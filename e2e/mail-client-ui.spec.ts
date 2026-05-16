@@ -172,7 +172,7 @@ test.describe('Mail Client packaged UI', () => {
     await expect(page.getByRole('heading', { name: 'Real IMAP message' })).toBeVisible();
     await expect(page.getByLabel('Email content').getByText('This message came from the platform mail API.')).toBeVisible();
     await page.getByTestId('email-flag-button-real-message-1').click();
-    await expect.poll(() => docsFor('messages').get('real-account-1:real-message-1') as { is_read?: boolean; is_flagged?: boolean }).toMatchObject({ is_read: true, is_flagged: true });
+    await expect.poll(() => [...docsFor('messages').values()].find((message: any) => message.email_id === 'real-message-1') as { is_read?: boolean; is_flagged?: boolean }).toMatchObject({ is_read: true, is_flagged: true });
 
     for (const mailboxId of ['inbox', 'drafts', 'sent', 'archive', 'junk', 'trash']) {
       await expect(page.getByTestId(`mailbox-button-${mailboxId}`)).toBeVisible();
@@ -207,8 +207,9 @@ test.describe('Mail Client packaged UI', () => {
       expect.stringMatching(/^POST \/api\/v1\/platform\/mail-client\/documents\/messages Bearer mail-ui-platform-token$/),
       expect.stringMatching(/^POST \/api\/v1\/platform\/mail-client\/documents\/mailboxes Bearer mail-ui-platform-token$/),
     ]));
-    expect(docsFor('messages').has('real-account-1:real-message-1')).toBe(true);
-    expect([...docsFor('messages').keys()].some((key) => key.startsWith('real-account-1:real-sent-'))).toBe(true);
+    expect([...docsFor('messages').keys()].every((key) => /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(key))).toBe(true);
+    expect([...docsFor('messages').values()].some((message: any) => message.email_id === 'real-message-1')).toBe(true);
+    expect([...docsFor('messages').values()].some((message: any) => message.subject === 'Real sent from no-host flow' && message.mailbox_id === 'sent')).toBe(true);
     expect(mailboxReads).toContain('SENT');
     await expect(page.getByText('Alice Chen')).toHaveCount(0);
   });
