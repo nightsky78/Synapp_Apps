@@ -72,10 +72,52 @@
     },
     "ui_schemas": {
       "type": "object",
-      "additionalProperties": { "$ref": "#/definitions/json_schema" },
+      "additionalProperties": { "$ref": "#/definitions/app_ui_schema" },
       "properties": {
-        "main": { "$ref": "#/definitions/json_schema" },
-        "settings": { "$ref": "#/definitions/json_schema" }
+        "main": { "$ref": "#/definitions/app_ui_schema" },
+        "settings": { "$ref": "#/definitions/app_ui_schema" }
+      }
+    },
+    "app_ui_schema": {
+      "oneOf": [
+        { "$ref": "#/definitions/json_schema" },
+        { "$ref": "#/definitions/page_layout_schema_envelope" }
+      ]
+    },
+    "page_layout_schema_envelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_type", "page_layout_schema"],
+      "properties": {
+        "schema_type": { "const": "page_layout_schema" },
+        "page_layout_schema": { "$ref": "#/definitions/page_layout_schema" }
+      }
+    },
+    "page_layout_schema": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["layout", "components"],
+      "properties": {
+        "layout": { "type": "string", "minLength": 1 },
+        "components": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/page_layout_component" }
+        }
+      }
+    },
+    "page_layout_component": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["kind", "id"],
+      "properties": {
+        "kind": { "type": "string", "minLength": 1 },
+        "id": { "type": "string", "minLength": 1 },
+        "initial_view": { "type": "string" },
+        "supported_views": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
       }
     },
     "json_schema": {

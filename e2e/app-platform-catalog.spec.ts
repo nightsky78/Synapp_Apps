@@ -23,6 +23,7 @@ type AppCatalogEntry = {
   installed: boolean;
   enabled: boolean;
   verification_status: 'pending' | 'passed' | 'failed' | 'unavailable';
+  ui_schemas?: CatalogEntryFile['manifest']['ui_schemas'];
 };
 
 type InstalledApp = {
@@ -47,6 +48,7 @@ type MockAppPlatformController = {
 type AppUiSchemaState = {
   app_id: string;
   state: 'available' | 'disabled' | 'not_installed' | 'permission_denied' | 'unsupported';
+  source?: string;
   page_layout_schema?: unknown;
   recovery?: {
     title: string;
@@ -66,6 +68,12 @@ type CatalogEntryFile = {
   signature?: { verification_status?: string };
   manifest: {
     capabilities: ManifestCapability[];
+    ui_schemas?: {
+      main?: {
+        schema_type?: string;
+        page_layout_schema?: unknown;
+      };
+    };
   };
 };
 
@@ -242,7 +250,7 @@ test.describe('Synapp Apps app-platform catalog visibility', () => {
     await expect(page.getByTestId('app-capability-toggle-calendar:settings')).toBeChecked();
   });
 
-  test('TC-SA-CAL-003: Calendar Management UI schema resolves not-installed, unsupported, and disabled states', async ({ page }) => {
+  test('TC-SA-CAL-003: Calendar Management UI schema resolves not-installed, available, and disabled states', async ({ page }) => {
     const catalog = await loadCatalogEntries();
     await mockAppPlatform(page, catalog);
 
@@ -263,8 +271,17 @@ test.describe('Synapp Apps app-platform catalog visibility', () => {
 
     await expect(fetchCalendarUiSchemaState(page)).resolves.toMatchObject({
       app_id: 'calendar-management',
-      state: 'unsupported',
-      recovery: { action: 'platform_escalation' },
+      state: 'available',
+      source: 'ui_schemas.main',
+      page_layout_schema: {
+        layout: 'workspace',
+        components: [
+          expect.objectContaining({
+            kind: 'calendar.workspace.v1',
+            id: 'calendar.workspace',
+          }),
+        ],
+      },
     });
 
     await page.evaluate(async () => {
@@ -280,7 +297,7 @@ test.describe('Synapp Apps app-platform catalog visibility', () => {
     await expectCalendarAppRouteRecovery(page, /disabled|enable|Calendar Management/i);
   });
 
-  test('TC-SA-CAL-004: Calendar Management app route smoke renders shell or structured recovery', async ({ page }) => {
+  test('TC-SA-CAL-004: Calendar Management app route smoke renders native workspace availability', async ({ page }) => {
     const catalog = await loadCatalogEntries();
     await mockAppPlatform(page, catalog);
 
@@ -293,7 +310,7 @@ test.describe('Synapp Apps app-platform catalog visibility', () => {
     expect(response?.ok(), 'calendar app route should not fail at document navigation').toBe(true);
 
     await expect(page.locator('body')).not.toHaveText(/^\s*$/);
-    await expect(page.locator('body')).toContainText(/Calendar Management|Calendar|unsupported|recovery|not available/i);
+    await expect(page.locator('body')).toContainText(/Calendar Management|Calendar|available/i);
   });
 
   test('TC-SA-MAIL-001: Mail Client install, enable, capability review, uninstall, and reinstall lifecycle', async ({ page }) => {
@@ -394,6 +411,7 @@ function toAppCatalogEntry(entry: CatalogEntryFile): AppCatalogEntry {
     installed: false,
     enabled: false,
     verification_status: verificationStatus(entry.signature?.verification_status),
+    ui_schemas: entry.manifest.ui_schemas,
     capabilities: entry.manifest.capabilities.map((capability) => ({
       ...capability,
       granted: capability.required,
@@ -710,6 +728,16 @@ async function mockAppPlatform(page: Page, catalog: AppCatalogEntry[]): Promise<
     }
 
     if (app.app_id === 'calendar-management') {
+      const mainSchema = app.ui_schemas?.main;
+      if (mainSchema?.schema_type === 'page_layout_schema') {
+        return {
+          app_id: app.app_id,
+          state: 'available',
+          source: 'ui_schemas.main',
+          page_layout_schema: mainSchema.page_layout_schema,
+        };
+      }
+
       return {
         app_id: app.app_id,
         state: 'unsupported',

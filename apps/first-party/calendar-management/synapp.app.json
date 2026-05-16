@@ -5,7 +5,7 @@
   "name": "Calendar Management",
   "version": "0.1.0",
   "summary": "Outlook-inspired Synapp calendar workspace with deterministic Wasm planning tools.",
-  "description": "First-party Synapp calendar app. The React UI is the human calendar workspace for calendar views, event editing, scheduling assistant, invitations, categories, sharing, delegates, subscriptions, reminders, settings, offline state, and audit projections. The Wasm module is a pure planner and validator; host services own persistence, invites, contacts, free/busy, rooms, reminders, conference links, sharing, subscriptions, offline cache, and audit.",
+  "description": "First-party Synapp calendar app. The host-rendered native calendar workspace owns calendar views and persistent event editing through the platform calendar API. The Wasm module remains a pure planner and validator; host services own persistence, invites, contacts, free/busy, rooms, reminders, conference links, sharing, subscriptions, offline cache, and audit.",
   "publisher": {
     "id": "synapp",
     "name": "Synapp"
@@ -85,6 +85,22 @@
         }
       }
     ]
+  },
+  "ui_schemas": {
+    "main": {
+      "schema_type": "page_layout_schema",
+      "page_layout_schema": {
+        "layout": "workspace",
+        "components": [
+          {
+            "kind": "calendar.workspace.v1",
+            "id": "calendar.workspace",
+            "initial_view": "week",
+            "supported_views": ["day", "week", "month", "agenda"]
+          }
+        ]
+      }
+    }
   },
   "resource_limits": {
     "memory_bytes": 67108864,

@@ -3,14 +3,14 @@
   "app_id": "calendar-management",
   "name": "Calendar Management",
   "summary": "Outlook-inspired Synapp calendar workspace with deterministic Wasm planning tools.",
-  "description": "First-party Synapp calendar app. The React UI is the human calendar workspace for calendar views, event editing, scheduling assistant, invitations, categories, sharing, delegates, subscriptions, reminders, settings, offline state, and audit projections. The Wasm module is a pure planner and validator; host services own persistence, invites, contacts, free/busy, rooms, reminders, conference links, sharing, subscriptions, offline cache, and audit.",
+  "description": "First-party Synapp calendar app. The host-rendered native calendar workspace owns calendar views and persistent event editing through the platform calendar API. The Wasm module remains a pure planner and validator; host services own persistence, invites, contacts, free/busy, rooms, reminders, conference links, sharing, subscriptions, offline cache, and audit.",
   "version": "0.1.0",
   "publisher": "Synapp",
   "category": "productivity",
   "repository_url": "https://github.com/nightsky78/Synapp_Apps/",
   "package_url": "https://github.com/nightsky78/Synapp_Apps/releases/download/calendar-management-v0.1.0/calendar-management-0.1.0.tar.gz",
-  "package_sha256": "a7de401f6729d87c0950476368d00c25db4bd3ae88737a2ac447d1d12e45d7e8",
-  "manifest_sha256": "553a9088ac5741cdf3b3bbad7d52f49ba12c45ecda1303d25c1e6ee25c697a57",
+  "package_sha256": "e1c6166991e3f251f53660a8fa16a15b09dc5353981f94b3993d48eed25bd045",
+  "manifest_sha256": "cbd1388fad63051ac6a792d3a3a6a92e59127d9351474d0f1d0cbc75b9b3b9f3",
   "signature": {
     "type": "metadata-only",
     "signer": "synapp-dev-catalog",
@@ -29,7 +29,7 @@
     "name": "Calendar Management",
     "version": "0.1.0",
     "summary": "Outlook-inspired Synapp calendar workspace with deterministic Wasm planning tools.",
-    "description": "First-party Synapp calendar app. The React UI is the human calendar workspace for calendar views, event editing, scheduling assistant, invitations, categories, sharing, delegates, subscriptions, reminders, settings, offline state, and audit projections. The Wasm module is a pure planner and validator; host services own persistence, invites, contacts, free/busy, rooms, reminders, conference links, sharing, subscriptions, offline cache, and audit.",
+    "description": "First-party Synapp calendar app. The host-rendered native calendar workspace owns calendar views and persistent event editing through the platform calendar API. The Wasm module remains a pure planner and validator; host services own persistence, invites, contacts, free/busy, rooms, reminders, conference links, sharing, subscriptions, offline cache, and audit.",
     "publisher": {
       "id": "synapp",
       "name": "Synapp"
@@ -509,6 +509,27 @@
           }
         }
       ]
+    },
+    "ui_schemas": {
+      "main": {
+        "schema_type": "page_layout_schema",
+        "page_layout_schema": {
+          "layout": "workspace",
+          "components": [
+            {
+              "kind": "calendar.workspace.v1",
+              "id": "calendar.workspace",
+              "initial_view": "week",
+              "supported_views": [
+                "day",
+                "week",
+                "month",
+                "agenda"
+              ]
+            }
+          ]
+        }
+      }
     },
     "resource_limits": {
       "memory_bytes": 67108864,
