@@ -156,11 +156,20 @@ test.describe('Calendar Management static app contract', () => {
 
     const workspace = appManifest.ui_schemas?.main?.page_layout_schema?.components?.[0];
     expect(appManifest.ui_schemas?.main?.schema_type).toBe('page_layout_schema');
+    expect((appManifest.ui_schemas?.main as any)?.resource?.uri).toBe('app://calendar-management/ui/main');
+    expect((appManifest.ui_schemas?.main as any)?.resource?.mime_type).toBe('application/vnd.synapp.page-layout+json');
     expect(appManifest.ui_schemas?.main?.page_layout_schema?.layout).toBe('workspace');
     expect(workspace?.kind).toBe('calendar.workspace.v1');
     expect(workspace?.id).toBe('calendar.workspace');
     expect(workspace?.initial_view).toBe('week');
     expect(workspace?.supported_views).toEqual(['day', 'week', 'month', 'agenda']);
+    const affordances = (workspace as any)?.affordances;
+    expect(affordances?.find_meeting_times?.tool).toBe('suggest_meeting_times');
+    expect(affordances?.edit_occurrence_vs_series?.tool).toBe('update_event');
+    expect(affordances?.edit_occurrence_vs_series?.scope_values).toEqual(['occurrence', 'series']);
+    expect(affordances?.rsvp_with_comment_and_notify?.tool).toBe('respond_to_invitation');
+    expect(affordances?.rsvp_with_comment_and_notify?.comment_field).toBe('message');
+    expect(affordances?.rsvp_with_comment_and_notify?.notify_field).toBe('send_response');
   });
 
   test('TC-SA-CAL-CONTRACT-004: event persistence contract targets the platform calendar API', async () => {

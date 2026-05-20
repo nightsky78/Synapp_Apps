@@ -89,6 +89,10 @@
   "ui_schemas": {
     "main": {
       "schema_type": "page_layout_schema",
+      "resource": {
+        "uri": "app://calendar-management/ui/main",
+        "mime_type": "application/vnd.synapp.page-layout+json"
+      },
       "page_layout_schema": {
         "layout": "workspace",
         "components": [
@@ -96,7 +100,27 @@
             "kind": "calendar.workspace.v1",
             "id": "calendar.workspace",
             "initial_view": "week",
-            "supported_views": ["day", "week", "month", "agenda"]
+            "supported_views": ["day", "week", "month", "agenda"],
+            "affordances": {
+              "find_meeting_times": {
+                "tool": "suggest_meeting_times",
+                "required_capabilities": ["calendar:read"],
+                "input_schema_ref": "plugin.json#/definitions/SuggestMeetingTimesInput"
+              },
+              "edit_occurrence_vs_series": {
+                "tool": "update_event",
+                "required_capabilities": ["calendar:write"],
+                "scope_values": ["occurrence", "series"],
+                "input_schema_ref": "plugin.json#/definitions/UpdateEventInput"
+              },
+              "rsvp_with_comment_and_notify": {
+                "tool": "respond_to_invitation",
+                "required_capabilities": ["calendar:respond"],
+                "comment_field": "message",
+                "notify_field": "send_response",
+                "input_schema_ref": "plugin.json#/definitions/RespondToInvitationInput"
+              }
+            }
           }
         ]
       }

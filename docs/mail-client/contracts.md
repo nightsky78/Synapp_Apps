@@ -4,6 +4,66 @@ Stage: 2 - Architect
 App: `apps/first-party/mail-client`  
 Date: 2026-05-08
 
+## Implemented Contract Addendum (Authoritative for Current App Build)
+
+Date: 2026-05-20  
+Status: implemented and validated in Dev
+
+This addendum is the authoritative app-side contract for the completed recipient and workspace-schema changes. It documents only behavior that is implemented and validated by deterministic contract tests.
+
+### Contract Scope And Boundary
+
+- Scope is limited to Mail Client app artifacts in this repository: Wasm exports, `plugin.json`, `synapp.app.json`, and `ui/src/bridge.js`.
+- The app validates outbound compose/send payloads and normalizes host API response shapes into the UI model.
+- The app does not own IMAP/SMTP execution, remote mailbox reconciliation, or host-side recipient canonicalization rules.
+- Inbound recipient parity across all platform envelopes depends on platform contract alignment and is tracked separately in `docs/mail-client/platform-mail-reconciliation-escalation.md`.
+
+### Recipient Handling (Implemented)
+
+- Outbound validation is enforced in the bridge send path. Malformed recipient input is rejected before host API submission.
+- Outbound bridge normalization serializes `to`, `cc`, and `bcc` to CSV strings for `/api/v1/mail/send`.
+- Inbound bridge normalization supports both legacy and structured message recipient fields (`from_addr`/`to_addrs` and structured `from`/`to`) for UI rendering.
+- The app does not claim a platform-wide guarantee that every inbound envelope is already normalized. That guarantee is platform-owned and currently tracked as a separate alignment item.
+
+### `ui_schemas.main` Workspace Contract And Source Precedence
+
+- `ui_schemas.main.schema_type` is `page_layout_schema`.
+- `ui_schemas.main.resource.uri` is `app://mail-client/ui/main` with mime type `application/vnd.synapp.page-layout+json`.
+- `ui_schemas.main.page_layout_schema.layout` is `workspace`.
+- The first workspace component contract is `kind: mail.workspace.v1`, `id: mail.workspace`.
+- Required affordance mappings are:
+  - `draft_lifecycle.create_tool = draft_email`
+  - `draft_lifecycle.update_tool = update_draft`
+  - `draft_lifecycle.send_tool = send_email`
+  - `reply_and_reply_all.tool = reply_email`
+  - `reply_and_reply_all.reply_all_field = reply_all`
+  - `search_discovery.tool = search_emails`
+- Source precedence is app source manifest first (`apps/first-party/mail-client/synapp.app.json`), with catalog parity required (`catalog/apps/mail-client.v1.json`).
+
+### Deterministic Contract Tests
+
+Deterministic static/runtime contract checks are implemented in `e2e/mail-client-contract.spec.ts`:
+
+- `TC-SA-MAIL-CONTRACT-001`: export and tool set parity across Rust/plugin/source manifest/catalog.
+- `TC-SA-MAIL-CONTRACT-002`: `ui_schemas.main` workspace envelope and affordance mappings.
+- `TC-SA-MAIL-CONTRACT-003`: bridge normalization of legacy and structured inbound recipient fields.
+- `TC-SA-MAIL-CONTRACT-004`: bridge send payload recipient serialization to CSV.
+- `TC-SA-MAIL-CONTRACT-005`: runtime `read_emails` recipient normalization behavior.
+- `TC-SA-MAIL-CONTRACT-006`: runtime `send_email` CSV recipient payload behavior.
+- `TC-SA-MAIL-CONTRACT-007`: runtime `send_email` malformed-recipient rejection.
+
+Validation evidence (Dev):
+
+- Command: `npx playwright test e2e/mail-client-contract.spec.ts --reporter=line`
+- Result: PASS
+
+### Prohibited Claims
+
+- Do not claim inbound recipient normalization is universally guaranteed by the platform today.
+- Do not claim host-side mailbox reconciliation parity is complete from app-side changes alone.
+- Do not claim undocumented platform transformations for recipient formats.
+- Do not claim behavior outside deterministic coverage in `e2e/mail-client-contract.spec.ts`.
+
 ## 1. ABI And Envelope Contract
 
 All exports use the same Wasm ABI:

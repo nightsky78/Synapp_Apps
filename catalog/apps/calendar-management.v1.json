@@ -10,7 +10,7 @@
   "repository_url": "https://github.com/nightsky78/Synapp_Apps/",
   "package_url": "https://github.com/nightsky78/Synapp_Apps/releases/download/calendar-management-v0.1.0/calendar-management-0.1.0.tar.gz",
   "package_sha256": "e1c6166991e3f251f53660a8fa16a15b09dc5353981f94b3993d48eed25bd045",
-  "manifest_sha256": "cbd1388fad63051ac6a792d3a3a6a92e59127d9351474d0f1d0cbc75b9b3b9f3",
+  "manifest_sha256": "4acbf4119b5069e2b6e2b58e07dfc8df0c37d0a34e9d47486c31a420b7b62a61",
   "signature": {
     "type": "metadata-only",
     "signer": "synapp-dev-catalog",
@@ -513,6 +513,10 @@
     "ui_schemas": {
       "main": {
         "schema_type": "page_layout_schema",
+        "resource": {
+          "uri": "app://calendar-management/ui/main",
+          "mime_type": "application/vnd.synapp.page-layout+json"
+        },
         "page_layout_schema": {
           "layout": "workspace",
           "components": [
@@ -525,7 +529,36 @@
                 "week",
                 "month",
                 "agenda"
-              ]
+              ],
+              "affordances": {
+                "find_meeting_times": {
+                  "tool": "suggest_meeting_times",
+                  "required_capabilities": [
+                    "calendar:read"
+                  ],
+                  "input_schema_ref": "plugin.json#/definitions/SuggestMeetingTimesInput"
+                },
+                "edit_occurrence_vs_series": {
+                  "tool": "update_event",
+                  "required_capabilities": [
+                    "calendar:write"
+                  ],
+                  "scope_values": [
+                    "occurrence",
+                    "series"
+                  ],
+                  "input_schema_ref": "plugin.json#/definitions/UpdateEventInput"
+                },
+                "rsvp_with_comment_and_notify": {
+                  "tool": "respond_to_invitation",
+                  "required_capabilities": [
+                    "calendar:respond"
+                  ],
+                  "comment_field": "message",
+                  "notify_field": "send_response",
+                  "input_schema_ref": "plugin.json#/definitions/RespondToInvitationInput"
+                }
+              }
             }
           ]
         }

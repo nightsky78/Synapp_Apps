@@ -483,13 +483,22 @@ function normalizeAccounts(accounts) {
 
 function normalizeMessage(message) {
   const timestamp = message.date_iso ? Math.floor(Date.parse(message.date_iso) / 1000) : 0;
+  const rawFrom = typeof message.from_addr === 'string' ? message.from_addr : message.from;
+  const rawTo = message.to_addrs ?? message.to ?? [];
+  const normalizedTo = normalizeRecipientList(rawTo);
   return {
     email_id: message.id || message.uid || message.message_id,
     account_id: message.account_id,
     mailbox_id: String(message.mailbox || 'INBOX').toLowerCase(),
     thread_id: message.message_id || message.id || message.uid,
-    from: { email: message.from?.email || '', display_name: message.from?.name || message.from?.email || '' },
-    to: (message.to || []).map((address) => ({ email: address.email || '', display_name: address.name || address.email || '' })),
+    from: typeof rawFrom === 'string'
+      ? { email: rawFrom, display_name: rawFrom }
+      : { email: rawFrom?.email || '', display_name: rawFrom?.name || rawFrom?.email || '' },
+    to: normalizedTo.map((address) => {
+      const email = recipientEmail(address);
+      const displayName = typeof address === 'string' ? email : (address?.name || email);
+      return { email, display_name: displayName };
+    }),
     cc: [],
     bcc: [],
     subject: message.subject || '(no subject)',
@@ -505,6 +514,39 @@ function normalizeMessage(message) {
     categories: [],
     attachments: [],
   };
+}
+
+function normalizeRecipientList(value) {
+  if (Array.isArray(value)) return value;
+  if (typeof value === 'string') {
+    return value
+      .split(',')
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+  }
+  return [];
+}
+
+function recipientEmail(recipient) {
+  if (typeof recipient === 'string') return recipient.trim();
+  return String(recipient?.email || '').trim();
+}
+
+function isSafeRecipientEmail(value) {
+  if (!value) return false;
+  if (value.includes('\r') || value.includes('\n') || value.includes(',')) return false;
+  const parts = value.split('@');
+  return parts.length === 2 && parts[0].length > 0 && parts[1].length > 0;
+}
+
+function serializeRecipients(recipients, fieldName) {
+  const normalized = normalizeRecipientList(recipients)
+    .map((recipient) => recipientEmail(recipient))
+    .filter((email) => email.length > 0);
+  if (normalized.some((email) => !isSafeRecipientEmail(email))) {
+    throw new Error(`${fieldName} contains an invalid recipient address.`);
+  }
+  return normalized.join(',');
 }
 
 function accountPayload(input) {
@@ -693,13 +735,16 @@ const REST_OPERATIONS = {
   },
   async send_email(payload) {
     const draft = draftStore.get(payload.draft_id) || payload.draft || payload;
+    const toRecipients = serializeRecipients(draft.to, 'to');
+    const ccRecipients = serializeRecipients(draft.cc, 'cc');
+    const bccRecipients = serializeRecipients(draft.bcc, 'bcc');
     const data = await apiJson('/api/v1/mail/send', {
       method: 'POST',
       body: JSON.stringify({
         account_id: payload.account_id || draft.account_id,
-        to: (draft.to || []).map((recipient) => recipient.email || recipient).join(','),
-        cc: (draft.cc || []).map((recipient) => recipient.email || recipient).join(','),
-        bcc: (draft.bcc || []).map((recipient) => recipient.email || recipient).join(','),
+        to: toRecipients,
+        cc: ccRecipients,
+        bcc: bccRecipients,
         subject: draft.subject || '',
         body_text: draft.body_text || '',
         body_html: draft.body_html || '',

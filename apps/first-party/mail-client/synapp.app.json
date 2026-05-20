@@ -67,10 +67,10 @@
     { "name": "cancel_scheduled_send", "description": "Cancel a scheduled send.", "input_schema": { "type": "object", "properties": { "context": { "type": "object" }, "job_id": { "type": "string" }, "account_id": { "type": "string" }, "draft_id": { "type": "string" } }, "required": ["context", "job_id", "account_id"] }, "output_schema": { "type": "object" } }
   ],
   "ui": {
-    "entrypoint": "mail-client.nav",
+    "entrypoint": "ui/dist/index.html",
     "contributions": [
       {
-        "type": "nav_item",
+        "type": "navigation_item",
         "id": "mail-client.nav",
         "label": "Mail",
         "target": "app://mail-client/inbox",
@@ -88,6 +88,45 @@
         }
       }
     ]
+  },
+  "ui_schemas": {
+    "main": {
+      "schema_type": "page_layout_schema",
+      "resource": {
+        "uri": "app://mail-client/ui/main",
+        "mime_type": "application/vnd.synapp.page-layout+json"
+      },
+      "page_layout_schema": {
+        "layout": "workspace",
+        "components": [
+          {
+            "kind": "mail.workspace.v1",
+            "id": "mail.workspace",
+            "initial_view": "inbox",
+            "supported_views": ["inbox", "thread", "search", "compose", "settings"],
+            "affordances": {
+              "draft_lifecycle": {
+                "create_tool": "draft_email",
+                "update_tool": "update_draft",
+                "send_tool": "send_email",
+                "required_capabilities": ["mail:draft", "mail:send"]
+              },
+              "reply_and_reply_all": {
+                "tool": "reply_email",
+                "reply_all_field": "reply_all",
+                "required_capabilities": ["mail:send"],
+                "input_schema_ref": "plugin.json#/definitions/ReplyEmailInput"
+              },
+              "search_discovery": {
+                "tool": "search_emails",
+                "required_capabilities": ["mail:read"],
+                "input_schema_ref": "plugin.json#/definitions/SearchEmailsInput"
+              }
+            }
+          }
+        ]
+      }
+    }
   },
   "resource_limits": {
     "memory_bytes": 67108864,
